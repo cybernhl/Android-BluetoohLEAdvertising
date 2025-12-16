@@ -34,17 +34,17 @@ public class MainActivity extends AppCompatActivity {
         final Handler handler = new Handler();
         final BluetoothAdapter bluetoothadapter = BluetoothAdapter.getDefaultAdapter();
         binding.discoverBtn.setOnClickListener(v -> {
-            final BluetoothLeScanner mBluetoothLeScanner = bluetoothadapter.getBluetoothLeScanner();
+            final BluetoothLeScanner scanner = bluetoothadapter.getBluetoothLeScanner();
             final List<ScanFilter> filters = new ArrayList<ScanFilter>();
             final ScanFilter filter = new ScanFilter.Builder()
                     .setServiceUuid(demouuid)
                     .build();
             filters.add(filter);
 
-            ScanSettings settings = new ScanSettings.Builder()
+            final ScanSettings settings = new ScanSettings.Builder()
                     .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                     .build();
-            ScanCallback mScanCallback = new ScanCallback() {
+            final ScanCallback scanCallback = new ScanCallback() {
                 @Override
                 public void onScanResult(int callbackType, ScanResult result) {
                     super.onScanResult(callbackType, result);
@@ -53,7 +53,7 @@ public class MainActivity extends AppCompatActivity {
                             || TextUtils.isEmpty(result.getDevice().getName()))
                         return;
 
-                    StringBuilder builder = new StringBuilder(result.getDevice().getName());
+                    final StringBuilder builder = new StringBuilder(result.getDevice().getName());
 
                     builder.append("\n").append(new String(result.getScanRecord().getServiceData(result.getScanRecord().getServiceUuids().get(0)), Charset.forName("UTF-8")));
 
@@ -71,30 +71,29 @@ public class MainActivity extends AppCompatActivity {
                     super.onScanFailed(errorCode);
                 }
             };
-            mBluetoothLeScanner.startScan(filters, settings, mScanCallback);
-
+            scanner.startScan(filters, settings, scanCallback);
             handler.postDelayed(new Runnable() {
                 @Override
                 public void run() {
-                    mBluetoothLeScanner.stopScan(mScanCallback);
+                    scanner.stopScan(scanCallback);
                 }
             }, 10000);
 
         });
         binding.advertiseBtn.setOnClickListener(v -> {
-            BluetoothLeAdvertiser advertiser = bluetoothadapter.getBluetoothLeAdvertiser();
-            AdvertiseSettings settings = new AdvertiseSettings.Builder()
+            final BluetoothLeAdvertiser advertiser = bluetoothadapter.getBluetoothLeAdvertiser();
+            final AdvertiseSettings settings = new AdvertiseSettings.Builder()
                     .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
                     .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
                     .setConnectable(false)
                     .build();
-            AdvertiseData data = new AdvertiseData.Builder()
+            final AdvertiseData data = new AdvertiseData.Builder()
                     .setIncludeDeviceName(true)
                     .addServiceUuid(demouuid)
                     .addServiceData(demouuid, "0".getBytes(Charset.forName("UTF-8")))
                     .build();
 
-            AdvertiseCallback advertisingCallback = new AdvertiseCallback() {
+            final AdvertiseCallback advertisingCallback = new AdvertiseCallback() {
                 @Override
                 public void onStartSuccess(AdvertiseSettings settingsInEffect) {
                     super.onStartSuccess(settingsInEffect);
