@@ -14,7 +14,7 @@ android {
     defaultConfig {
         applicationId "com.tutsplus.bleadvertising"
         minSdk 21
-        targetSdk 36
+        targetSdk 21
         versionCode 1
         versionName "1.0"
     }
@@ -62,8 +62,6 @@ android {
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
     implementation(libs.kotlin.stdlib)
-
-    implementation 'com.android.support:appcompat-v7:28.0.0'
-
+    implementation (libs.android.support.appcompat.v7)
     testImplementation 'junit:junit:4.12'
 }
