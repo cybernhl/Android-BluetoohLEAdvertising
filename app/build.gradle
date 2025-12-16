@@ -1,17 +1,24 @@
-apply plugin: 'com.android.application'
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+}
 
 android {
-    compileSdkVersion 23
-    buildToolsVersion "23.0.2"
+    compileSdk  =36
     namespace "com.tutsplus.bleadvertising"
+    buildFeatures {
+        buildConfig = true
+        viewBinding = true
+    }
 
     defaultConfig {
         applicationId "com.tutsplus.bleadvertising"
-        minSdkVersion 21
-        targetSdkVersion 23
+        minSdk 21
+        targetSdk 36
         versionCode 1
         versionName "1.0"
     }
+
     buildTypes {
         release {
             minifyEnabled false
@@ -23,10 +30,40 @@ android {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_1_8.toString()
+    }
+
+    packaging {
+        resources {
+            excludes += "META-INF/*"
+            excludes += "META-INF/INDEX.LIST"
+            excludes += "kotlin/internal/internal.kotlin_builtins"
+            excludes += "kotlin/annotation/annotation.kotlin_builtins"
+            excludes += "kotlin/collections/collections.kotlin_builtins"
+            excludes += "kotlin/reflect/reflect.kotlin_builtins"
+            excludes += "kotlin/concurrent/atomics/atomics.kotlin_builtins"
+            excludes += "kotlin/ranges/ranges.kotlin_builtins"
+            excludes += "kotlin/kotlin.kotlin_builtins"
+            excludes += "kotlin/coroutines/coroutines.kotlin_builtins"
+            excludes += "META-INF/*.kotlin_module"
+            excludes += "META-INF/LICENSE"
+            excludes += "META-INF/LICENSE.txt"
+            excludes += "META-INF/NOTICE"
+            excludes += "META-INF/io.netty.versions.properties"
+            excludes += "META-INF/AL2.0"
+            excludes += "META-INF/LGPL2.1"
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
 }
 
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation(libs.kotlin.stdlib)
+
+    implementation 'com.android.support:appcompat-v7:28.0.0'
+
     testImplementation 'junit:junit:4.12'
-    implementation 'com.android.support:appcompat-v7:23.1.1'
 }
