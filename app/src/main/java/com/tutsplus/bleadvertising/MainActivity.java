@@ -182,34 +182,23 @@ public class MainActivity extends AppCompatActivity {
         // Flags are always added by the builder.
         int size = 3; // 1 (length) + 1 (type) + 1 (data) for Flags
 
+        // 2. Tx Power Level
         if (includeTxPower) {
             // 1 (length) + 1 (type) + 1 (data)
             size += 3;
         }
 
-        if (uuid != null) {
-            // Service UUID: 128-bit UUID is 16 bytes
-            // 1 (length) + 1 (type) + 16 (data)
-            size += 18;
-        }
-
+        // 3. Device Name
         if (includeDeviceName) {
             BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
             String deviceName = adapter.getName();
             if (deviceName != null && !deviceName.isEmpty()) {
-                // 1 (length) + 1 (type) + name_length_in_bytes
-                size += (2 + deviceName.getBytes(Charset.forName("UTF-8")).length);
+                size += (2 + deviceName.getBytes(Charset.forName("UTF-8")).length); // 1 for length, 1 for type
             }
         }
 
+        // 4. Service Data or Service UUID
         // --- 計算 Service UUID (AD Type 0x07) ---
-        // 只有當 Service Data 不存在時，單獨的 Service UUID 才會被計算
-        // 因為 Service Data 欄位本身已經包含了 UUID
-        if (uuid != null && serviceData == null) {
-            // Service UUID: 128-bit UUID is 16 bytes
-            // 1 (length) + 1 (type) + 16 (data)
-            size += 18;
-        }
         // --- 計算 Service Data (AD Type 0x21) ---
         if (serviceData != null && uuid != null) {
             // AD Structure: [Length] [Type] [Service Data UUID] [Service Data]
@@ -221,9 +210,40 @@ public class MainActivity extends AppCompatActivity {
             // A more precise calculation depends on the AD type used (0x16 for 16-bit UUID, etc.)
             // For simplicity, let's just add the data length plus overhead.
 //            size += (1 + 1 + 2 + serviceData.length);
-            int serviceDataLength = 1 + 16 + serviceData.length;
-            size += 1 + serviceDataLength;
+            int uuidSize = getServiceDataUuidSize(uuid); // Can be 2, 4, or 16
+            int adTypeSize = 1;
+            // The length of the data part of the AD Structure
+            int dataPartLength = adTypeSize + uuidSize + serviceData.length;
+            // The total size is 1 (for the length field) + dataPartLength
+            size += (1 + dataPartLength);
+        } else if (uuid != null) {
+            // If only a Service UUID is provided (no ServiceData)
+            // AD Structure: [Length] [Type] [UUID Data]
+            // We assume it's a list of 128-bit UUIDs for this case.
+            size += 18; // 1 (Length) + 1 (Type 0x07) + 16 (UUID)
         }
         return size;
+    }
+
+    /**
+     * Helper method to determine the byte size of a ParcelUuid for service data.
+     * Returns 2 for 16-bit, 4 for 32-bit, and 16 for 128-bit UUIDs.
+     */
+    private int getServiceDataUuidSize(ParcelUuid parcelUuid) {
+        final UUID uuid = parcelUuid.getUuid();
+        long lsb = uuid.getLeastSignificantBits();
+        long msb = uuid.getMostSignificantBits();
+        final long BLE_BASE_UUID_LSB = 0x800000805F9B34FBL;
+        final long BLE_BASE_UUID_MSB = 0x0000000000001000L;
+
+        if (lsb == BLE_BASE_UUID_LSB && (msb & 0xFFFF0000FFFFFFFFL) == BLE_BASE_UUID_MSB) {
+            // This is a 16-bit or 32-bit UUID
+            if ((msb & 0x0000FFFF00000000L) == 0) {
+                return 2; // 16-bit
+            } else {
+                return 4; // 32-bit
+            }
+        }
+        return 16; // 128-bit
     }
 }
