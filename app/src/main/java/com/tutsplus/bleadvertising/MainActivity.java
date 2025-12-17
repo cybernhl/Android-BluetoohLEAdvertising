@@ -97,7 +97,9 @@ public class MainActivity extends AppCompatActivity {
                     .addServiceUuid(demouuid)
                     .addServiceData(demouuid, serviceDataBytes)
                     .build();
-
+            final AdvertiseData response = new AdvertiseData.Builder()
+                    .setIncludeDeviceName(true)
+                    .build();
             final AdvertiseCallback advertisingCallback = new AdvertiseCallback() {
                 @Override
                 public void onStartSuccess(AdvertiseSettings settingsInEffect) {
@@ -110,8 +112,7 @@ public class MainActivity extends AppCompatActivity {
                     super.onStartFailure(errorCode);
                 }
             };
-
-            advertiser.startAdvertising(settings, data, advertisingCallback);
+            advertiser.startAdvertising(settings, data,response, advertisingCallback);
         });
         if (!bluetoothadapter.isMultipleAdvertisementSupported()) {
             Toast.makeText(getBaseContext(), "Multiple advertisement not supported", Toast.LENGTH_SHORT).show();
