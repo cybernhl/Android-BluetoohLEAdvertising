@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    compileSdk  =36
+    compileSdk 36
     namespace "com.tutsplus.bleadvertising"
     buildFeatures {
         buildConfig = true
@@ -14,7 +14,7 @@ android {
     defaultConfig {
         applicationId "com.tutsplus.bleadvertising"
         minSdk 21
-        targetSdk 21
+        targetSdk 36
         versionCode 1
         versionName "1.0"
     }
