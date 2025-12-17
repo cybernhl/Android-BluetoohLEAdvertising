@@ -224,6 +224,39 @@ public class MainActivity extends AppCompatActivity {
 
             final int appleCompanyId = 0x004C;
             final byte[] manufacturerDataBytes = new byte[]{0x12, 0x02, 0x00, 0x02};
+            final byte[] manufacturerDataiBeaconBytes = new byte[25];
+            // 2. 寫入固定的 Beacon Type (2 bytes)
+            manufacturerDataiBeaconBytes[0] = 0x02; // Proximity Beacon type
+            manufacturerDataiBeaconBytes[1] = 0x15; // Data length (21 bytes)
+
+            // 3. 寫入你的 Proximity UUID (16 bytes)
+            // 範例 UUID: "E2C56DB5-DFFB-48D2-B060-D0F5A71096E0"
+            // 你需要一個輔助函式將 UUID 字串轉換為 byte 陣列
+            UUID proximityUuid = UUID.fromString("E2C56DB5-DFFB-48D2-B060-D0F5A71096E0");
+            System.arraycopy(asBytes(proximityUuid), 0, manufacturerDataiBeaconBytes, 2, 16);
+
+            // 4. 寫入 Major (2 bytes) - 範例值: 10001 (0x2711)
+            int major = 10001;
+            manufacturerDataiBeaconBytes[18] = (byte) (major >> 8);
+            manufacturerDataiBeaconBytes[19] = (byte) major;
+
+            // 5. 寫入 Minor (2 bytes) - 範例值: 20002 (0x4E22)
+            int minor = 20002;
+            manufacturerDataiBeaconBytes[20] = (byte) (minor >> 8);
+            manufacturerDataiBeaconBytes[21] = (byte) minor;
+
+            // 6. 寫入 Measured Power (1 byte)
+            // 範例值: -59 dBm
+            byte txPower = (byte) -59;
+            manufacturerDataiBeaconBytes[22] = txPower;
+
+            // 為了補滿25 bytes, Apple 有時候會加入一些保留位元
+            // 但實際上從 [0] 到 [22] 已經是完整的 iBeacon 格式 (共23 bytes)
+            // 這裡我們只傳送這 23 bytes 的有效資料
+            byte[] iBeaconData = new byte[23];
+            System.arraycopy(manufacturerDataiBeaconBytes, 0, iBeaconData, 0, 23);
+
+
             final ParcelUuid amsServiceUuid = new ParcelUuid(UUID.fromString("89D3502B-0F36-433A-8EF4-C502AD55F8DC"));
             final ParcelUuid serviceDataUuid = new ParcelUuid(UUID.fromString("0000FEA0-0000-1000-8000-00805f9b34fb"));
             final ParcelUuid batteryServiceUuid = new ParcelUuid(UUID.fromString("0000180F-0000-1000-8000-00805f9b34fb"));
@@ -256,10 +289,20 @@ public class MainActivity extends AppCompatActivity {
                     .addServiceUuid(currentTimeServiceUuid)
                     .build();
 
+            final AdvertiseData iBeaconAdvertiseData = new AdvertiseData.Builder()
+                    .setIncludeDeviceName(false) // iBeacon 不包含裝置名稱
+                    .setIncludeTxPowerLevel(false) // Tx Power 已包含在 manufacturer data 中
+                    .addManufacturerData(appleCompanyId, iBeaconData)
+                    .build();
+
+
             final AdvertiseData response = new AdvertiseData.Builder()
                     .setIncludeDeviceName(false)
                     .addServiceUuid(amsServiceUuid)
                     .build();
+
+            final AdvertiseData iBeaconAdvertiseresponse = new AdvertiseData.Builder().build();
+
 
             Log.d(TAG, "--- STARTING CALCULATION COMPARISON ---");
 
@@ -617,5 +660,23 @@ public class MainActivity extends AppCompatActivity {
             case AdvertiseCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS: return "TOO_MANY_ADVERTISERS";
             default: return "未知錯誤: " + errorCode;
         }
+    }
+
+    /**
+     * 輔助函式，將 UUID 轉換為 big-endian byte 陣列。
+     * @param uuid 要轉換的 UUID
+     * @return 16-byte 的陣列
+     */
+    public static byte[] asBytes(UUID uuid) {
+        byte[] bytes = new byte[16];
+        long msb = uuid.getMostSignificantBits();
+        long lsb = uuid.getLeastSignificantBits();
+        for (int i = 0; i < 8; i++) {
+            bytes[i] = (byte) (msb >>> (8 * (7 - i)));
+        }
+        for (int i = 8; i < 16; i++) {
+            bytes[i] = (byte) (lsb >>> (8 * (7 - (i - 8))));
+        }
+        return bytes;
     }
 }
