@@ -95,6 +95,10 @@ public class MainActivity extends AppCompatActivity {
             final byte[] manufacturerDataBytes = new byte[] { 0x12, 0x02, 0x00, 0x02 }; // 來自您圖片中 "Unnamed" 裝置的範例資料
             final ParcelUuid amsServiceUuid = new ParcelUuid(UUID.fromString("89D3502B-0F36-433A-8EF4-C502AD55F8DC"));
             final ParcelUuid serviceDataUuid = new ParcelUuid(UUID.fromString("0000FEA0-0000-1000-8000-00805f9b34fb"));
+            final ParcelUuid batteryServiceUuid = new ParcelUuid(UUID.fromString("0000180F-0000-1000-8000-00805f9b34fb"));
+            final ParcelUuid deviceInfoServiceUuid = new ParcelUuid(UUID.fromString("0000180A-0000-1000-8000-00805f9b34fb"));
+            final ParcelUuid currentTimeServiceUuid = new ParcelUuid(UUID.fromString("00001805-0000-1000-8000-00805f9b34fb"));
+
             //準備要附加的資料。可以是空資料，或用來識別的特定位元組 這裡放一個簡單的標記，例如 0x01
             final byte[] serviceDataBytes = new byte[] { 0x01 };
             // --- 1. 設定廣播參數 ---
@@ -112,13 +116,19 @@ public class MainActivity extends AppCompatActivity {
                     .addManufacturerData(appleCompanyId, manufacturerDataBytes)
                     // 使用 ServiceData 來廣播，它會包含一個短 UUID 和你的資料
                     .addServiceData(serviceDataUuid, serviceDataBytes)
+                    .addServiceUuid(batteryServiceUuid) // 加入電池服務
+                    .addServiceUuid(deviceInfoServiceUuid) // 加入裝置資訊服務
+                    .addServiceUuid(currentTimeServiceUuid) // 加入當前時間服務
                     .build();
             // --- 3. 建立掃描回應封包 (Scan Response Packet) ---
             // 這裡放入完整的 128-bit UUID 和裝置名稱
             // 這樣組合通常不會超過 31 位元組 (除非你的裝置名稱非常長)
             final AdvertiseData response = new AdvertiseData.Builder()
                     .setIncludeDeviceName(false)
-                    .addServiceUuid(amsServiceUuid)
+                    .addServiceUuid(amsServiceUuid) // 加入自定義的 AMS 服務
+//                    .addServiceUuid(batteryServiceUuid) // 加入電池服務
+//                    .addServiceUuid(deviceInfoServiceUuid) // 加入裝置資訊服務
+//                    .addServiceUuid(currentTimeServiceUuid) // 加入當前時間服務
                     .build();
             final AdvertiseCallback advertisingCallback = new AdvertiseCallback() {
                 @Override
