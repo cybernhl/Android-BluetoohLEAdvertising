@@ -196,8 +196,16 @@ public class MainActivity extends AppCompatActivity {
                 size += (2 + deviceName.getBytes(Charset.forName("UTF-8")).length); // 1 for length, 1 for type
             }
         }
+        // 4. Service UUID (from .addServiceUuid)
+        // --- 計算 Service UUID (AD Type 0x07) ---
+        // This is added as a separate field by the builder.
+        if (uuid != null) {
+            // AD Structure: [Length] [Type 0x07] [UUID Data]
+            // This calculation assumes a list of 128-bit UUIDs.
+            size += 18; // 1 (Length) + 1 (Type) + 16 (UUID)
+        }
 
-        // 4. Service Data or Service UUID
+        // 5. Service Data (from .addServiceData)
         // --- 計算 Service UUID (AD Type 0x07) ---
         // --- 計算 Service Data (AD Type 0x21) ---
         if (serviceData != null && uuid != null) {
@@ -210,17 +218,12 @@ public class MainActivity extends AppCompatActivity {
             // A more precise calculation depends on the AD type used (0x16 for 16-bit UUID, etc.)
             // For simplicity, let's just add the data length plus overhead.
 //            size += (1 + 1 + 2 + serviceData.length);
-            int uuidSize = getServiceDataUuidSize(uuid); // Can be 2, 4, or 16
-            int adTypeSize = 1;
+            int uuidSizeInServiceData  = getServiceDataUuidSize(uuid); // Can be 2, 4, or 16
             // The length of the data part of the AD Structure
-            int dataPartLength = adTypeSize + uuidSize + serviceData.length;
-            // The total size is 1 (for the length field) + dataPartLength
+            // (1 for AD Type + size of UUID + size of data)
+            int dataPartLength = 1 + uuidSizeInServiceData + serviceData.length;
+            // The total size for this structure is 1 (for the length field) + dataPartLength
             size += (1 + dataPartLength);
-        } else if (uuid != null) {
-            // If only a Service UUID is provided (no ServiceData)
-            // AD Structure: [Length] [Type] [UUID Data]
-            // We assume it's a list of 128-bit UUIDs for this case.
-            size += 18; // 1 (Length) + 1 (Type 0x07) + 16 (UUID)
         }
         return size;
     }
