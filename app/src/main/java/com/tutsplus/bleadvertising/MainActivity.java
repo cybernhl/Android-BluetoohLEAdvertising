@@ -82,15 +82,20 @@ public class MainActivity extends AppCompatActivity {
         });
         binding.advertiseBtn.setOnClickListener(v -> {
             final BluetoothLeAdvertiser advertiser = bluetoothadapter.getBluetoothLeAdvertiser();
+            final boolean includeTxPower = true;
+            final boolean includeDeviceName = false;
+            final String deviceName = bluetoothadapter.getName();
+            byte[] serviceDataBytes = "0".getBytes(Charset.forName("UTF-8"));
             final AdvertiseSettings settings = new AdvertiseSettings.Builder()
-                    .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
-                    .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
-                    .setConnectable(false)
+                    .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
+                    .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
+                    .setConnectable(true)
                     .build();
             final AdvertiseData data = new AdvertiseData.Builder()
-                    .setIncludeDeviceName(true)
+                    .setIncludeDeviceName(includeDeviceName)
+                    .setIncludeTxPowerLevel(includeTxPower)
                     .addServiceUuid(demouuid)
-                    .addServiceData(demouuid, "0".getBytes(Charset.forName("UTF-8")))
+                    .addServiceData(demouuid, serviceDataBytes)
                     .build();
 
             final AdvertiseCallback advertisingCallback = new AdvertiseCallback() {
