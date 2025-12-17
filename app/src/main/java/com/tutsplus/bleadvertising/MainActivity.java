@@ -88,22 +88,30 @@ public class MainActivity extends AppCompatActivity {
         binding.advertiseBtn.setOnClickListener(v -> {
             TestCalculateAdvertiseDataSize();
             final BluetoothLeAdvertiser advertiser = bluetoothadapter.getBluetoothLeAdvertiser();
-            final boolean includeTxPower = true;
+            final boolean includeTxPower = false;
             final boolean includeDeviceName = false;
             final String deviceName = bluetoothadapter.getName();
-            byte[] serviceDataBytes = "0".getBytes(Charset.forName("UTF-8"));
+            final byte[] serviceDataBytes = "Service-Data".getBytes(Charset.forName("UTF-8"));
+            // --- 1. 設定廣播參數 ---
+            // 保持可連接 (Connectable = true)，這樣掃描端才能請求 Scan Response
             final AdvertiseSettings settings = new AdvertiseSettings.Builder()
-                    .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
-                    .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
+                    .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY) // 更改為低延遲模式以加快發現速度
+                    .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)    // 為了更好的訊號，使用高功率
                     .setConnectable(true)
                     .build();
+            // --- 2. 建立主廣播封包 (Advertise Packet) ---
+            // 這個封包只放入 Service UUID，確保它足夠小 (約 21 bytes)
             final AdvertiseData data = new AdvertiseData.Builder()
                     .setIncludeDeviceName(includeDeviceName)
                     .setIncludeTxPowerLevel(includeTxPower)
                     .addServiceUuid(demouuid)
                     .build();
+            // --- 3. 建立掃描回應封包 (Scan Response Packet) ---
             final AdvertiseData response = new AdvertiseData.Builder()
-                    .setIncludeDeviceName(true)
+                     .setIncludeDeviceName(includeDeviceName)       // 在掃描回應中可以包含裝置名稱
+                    //讓 "Manufacturer specific data" 顯示資料 0x1234 是一個自訂的公司ID，後面是你想發送的資料
+                    .addManufacturerData(0x1234, "Manu-Data".getBytes(Charset.forName("UTF-8")))
+//                  .addServiceData(demouuid, serviceDataBytes)//FIXME will ADVERTISE_FAILED_DATA_TOO_LARGE
                     .build();
             final AdvertiseCallback advertisingCallback = new AdvertiseCallback() {
                 @Override
