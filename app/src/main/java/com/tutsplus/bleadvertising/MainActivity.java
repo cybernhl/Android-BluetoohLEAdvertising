@@ -110,6 +110,25 @@ public class MainActivity extends AppCompatActivity {
                 public void onStartFailure(int errorCode) {
                     Log.e("BLE", "Advertising onStartFailure: " + errorCode);
                     super.onStartFailure(errorCode);
+                    switch (errorCode) {
+                        case ADVERTISE_FAILED_ALREADY_STARTED:
+                            Log.e("BLE", "App was already advertising");
+                            break;
+                        case ADVERTISE_FAILED_DATA_TOO_LARGE:
+                            Log.e("BLE", "DATA_TOO_LARGE");
+                            break;
+                        case ADVERTISE_FAILED_FEATURE_UNSUPPORTED:
+                            Log.e("BLE", "FEATURE_UNSUPPORTED");
+                            break;
+                        case ADVERTISE_FAILED_INTERNAL_ERROR:
+                            Log.e("BLE", "INTERNAL_ERROR");
+                            break;
+                        case ADVERTISE_FAILED_TOO_MANY_ADVERTISERS:
+                            Log.e("BLE", "TOO_MANY_ADVERTISERS");
+                            break;
+                        default:
+                            Log.wtf("BLE", "Unhandled error: " + errorCode);
+                    }
                 }
             };
             advertiser.startAdvertising(settings, data,response, advertisingCallback);
