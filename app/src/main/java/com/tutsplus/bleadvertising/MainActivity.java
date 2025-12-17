@@ -91,7 +91,12 @@ public class MainActivity extends AppCompatActivity {
             final boolean includeTxPower = false;
             final boolean includeDeviceName = false;
             final String deviceName = bluetoothadapter.getName();
-            final byte[] serviceDataBytes = "Service-Data".getBytes(Charset.forName("UTF-8"));
+            final int appleCompanyId = 0x004C; // Apple's Company ID [1, 2]
+            final byte[] manufacturerDataBytes = new byte[] { 0x12, 0x02, 0x00, 0x02 }; // 來自您圖片中 "Unnamed" 裝置的範例資料
+            final ParcelUuid amsServiceUuid = new ParcelUuid(UUID.fromString("89D3502B-0F36-433A-8EF4-C502AD55F8DC"));
+            final ParcelUuid serviceDataUuid = new ParcelUuid(UUID.fromString("0000FEA0-0000-1000-8000-00805f9b34fb"));
+            //準備要附加的資料。可以是空資料，或用來識別的特定位元組 這裡放一個簡單的標記，例如 0x01
+            final byte[] serviceDataBytes = new byte[] { 0x01 };
             // --- 1. 設定廣播參數 ---
             // 保持可連接 (Connectable = true)，這樣掃描端才能請求 Scan Response
             final AdvertiseSettings settings = new AdvertiseSettings.Builder()
@@ -100,18 +105,20 @@ public class MainActivity extends AppCompatActivity {
                     .setConnectable(true)
                     .build();
             // --- 2. 建立主廣播封包 (Advertise Packet) ---
-            // 這個封包只放入 Service UUID，確保它足夠小 (約 21 bytes)
+            // 這個封包放入 Manufacturer Data，Manufacturer Specific Data 必須放在主廣播封包 (Advertising Packet) 中才能被掃描 App 直接看到 並且不包含裝置名稱和 Tx Power 以節省空間
             final AdvertiseData data = new AdvertiseData.Builder()
-                    .setIncludeDeviceName(includeDeviceName)
-                    .setIncludeTxPowerLevel(includeTxPower)
-                    .addServiceUuid(demouuid)
+                    .setIncludeDeviceName(false)
+                    .setIncludeTxPowerLevel(false)
+                    .addManufacturerData(appleCompanyId, manufacturerDataBytes)
+                    // 使用 ServiceData 來廣播，它會包含一個短 UUID 和你的資料
+                    .addServiceData(serviceDataUuid, serviceDataBytes)
                     .build();
             // --- 3. 建立掃描回應封包 (Scan Response Packet) ---
+            // 這裡放入完整的 128-bit UUID 和裝置名稱
+            // 這樣組合通常不會超過 31 位元組 (除非你的裝置名稱非常長)
             final AdvertiseData response = new AdvertiseData.Builder()
-                     .setIncludeDeviceName(includeDeviceName)       // 在掃描回應中可以包含裝置名稱
-                    //讓 "Manufacturer specific data" 顯示資料 0x1234 是一個自訂的公司ID，後面是你想發送的資料
-                    .addManufacturerData(0x1234, "Manu-Data".getBytes(Charset.forName("UTF-8")))
-//                  .addServiceData(demouuid, serviceDataBytes)//FIXME will ADVERTISE_FAILED_DATA_TOO_LARGE
+                    .setIncludeDeviceName(false)
+                    .addServiceUuid(amsServiceUuid)
                     .build();
             final AdvertiseCallback advertisingCallback = new AdvertiseCallback() {
                 @Override
