@@ -220,7 +220,9 @@ public class MainActivity extends AppCompatActivity {
             // but let's assume the full UUID is part of the data identification.
             // A more precise calculation depends on the AD type used (0x16 for 16-bit UUID, etc.)
             // For simplicity, let's just add the data length plus overhead.
-            size += (1 + 1 + 2 + serviceData.length);
+//            size += (1 + 1 + 2 + serviceData.length);
+            int serviceDataLength = 1 + 16 + serviceData.length;
+            size += 1 + serviceDataLength;
         }
         return size;
     }
