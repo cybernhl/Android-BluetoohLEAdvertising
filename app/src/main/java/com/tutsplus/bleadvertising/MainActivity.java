@@ -537,61 +537,41 @@ public class MainActivity extends AppCompatActivity {
     private int calculateAdvertiseDataSizeNew(AdvertiseData data, @Nullable String deviceName) {
         if (data == null) return 0;
 
-        int size = 3; // Flags
+        // 從 AdvertiseData 物件中提取參數
+        boolean includeDeviceName = data.getIncludeDeviceName();
+        boolean includeTxPower = data.getIncludeTxPowerLevel();
+        List<ParcelUuid> serviceUuids = data.getServiceUuids();
 
-        // 1. Service UUID 列表 (AD Types 0x03, 0x07)
-        if (data.getServiceUuids() != null && !data.getServiceUuids().isEmpty()) {
-            List<ParcelUuid> uuids16 = new ArrayList<>();
-            List<ParcelUuid> uuids128 = new ArrayList<>();
-            for (ParcelUuid uuid : data.getServiceUuids()) {
-                if (is16BitUuid(uuid)) {
-                    uuids16.add(uuid);
-                } else {
-                    uuids128.add(uuid);
-                }
-            }
-            if (!uuids16.isEmpty()) {
-                size += (2 + uuids16.size() * 2);
-            }
-            if (!uuids128.isEmpty()) {
-                size += (2 + uuids128.size() * 16);
-            }
-        }
-
-        // 2. Service Data (AD Type 0x16)
-        if (data.getServiceData() != null && !data.getServiceData().isEmpty()) {
-            for (Map.Entry<ParcelUuid, byte[]> entry : data.getServiceData().entrySet()) {
-                int dataLen = (entry.getValue() == null) ? 0 : entry.getValue().length;
-                if (is16BitUuid(entry.getKey())) {
-                    size += (2 + 2 + dataLen); // 2(header) + 2(uuid) + data
-                } else {
-                    size += (2 + 16 + dataLen); // 2(header) + 16(uuid) + data
-                }
-            }
-        }
-
-        // 3. 廠商特定資料 (AD Type 0xFF - Manufacturer Specific Data)
+        // 提取 Manufacturer Data
+        int manufacturerId = -1;
+        byte[] manufacturerDataBytes = null;
         if (data.getManufacturerSpecificData() != null && data.getManufacturerSpecificData().size() > 0) {
-            SparseArray<byte[]> manufacturerData = data.getManufacturerSpecificData();
-            for (int i = 0; i < manufacturerData.size(); i++) {
-                int dataLen = (manufacturerData.valueAt(i) == null) ? 0 : manufacturerData.valueAt(i).length;
-                size += (2 + 2 + dataLen); // 2(header) + 2(companyID) + data
-            }
+            // 假設只處理第一個 Manufacturer Data
+            manufacturerId = data.getManufacturerSpecificData().keyAt(0);
+            manufacturerDataBytes = data.getManufacturerSpecificData().valueAt(0);
         }
 
-        // 4. 發射功率 (AD Type 0x0A - Tx Power Level)
-        if (data.getIncludeTxPowerLevel()) {
-            size += 3;
+        // 提取 Service Data
+        ParcelUuid serviceDataUuid = null;
+        byte[] serviceDataBytes = null;
+        if (data.getServiceData() != null && !data.getServiceData().isEmpty()) {
+            // 假設只處理第一個 Service Data
+            Map.Entry<ParcelUuid, byte[]> entry = data.getServiceData().entrySet().iterator().next();
+            serviceDataUuid = entry.getKey();
+            serviceDataBytes = entry.getValue();
         }
 
-        // 5. 裝置名稱 (AD Type 0x09)
-        if (data.getIncludeDeviceName()) {
-            if (deviceName != null && !deviceName.isEmpty()) {
-                size += (2 + deviceName.getBytes(StandardCharsets.UTF_8).length);
-            }
-        }
-
-        return size;
+        // 呼叫原始的計算函式
+        return calculateAdvertiseDataSize(
+                deviceName,
+                includeDeviceName,
+                includeTxPower,
+                manufacturerId,
+                manufacturerDataBytes,
+                serviceUuids,
+                serviceDataUuid,
+                serviceDataBytes
+        );
     }
 
 
