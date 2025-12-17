@@ -173,105 +173,191 @@ public class MainActivity extends AppCompatActivity {
 
     private void TestCalculateAdvertiseDataSize(){
         // --- 測試區塊：這段程式碼只用來驗證計算函式的正確性 ---
-        Log.d("BLE_TEST", "--- Running Calculation Tests ---");
-        final ParcelUuid demouuid = new ParcelUuid(UUID.fromString("CDB7950D-73F1-4D4D-8E47-C090502DBD63"));
+        Log.d("BLE_TEST", "--- Running New Calculation Tests ---");
+
+        // --- 準備測試資料 (與 advertiseBtn 中的設定一致) ---
+        final int appleCompanyId = 0x004C;
+        final byte[] manufacturerDataBytes = new byte[] { 0x12, 0x02, 0x00, 0x02 };
+        final ParcelUuid serviceDataUuid = new ParcelUuid(UUID.fromString("0000FEA0-0000-1000-8000-00805f9b34fb"));
+        final byte[] serviceDataBytes = new byte[] { 0x01 };
         final ParcelUuid batteryServiceUuid = new ParcelUuid(UUID.fromString("0000180F-0000-1000-8000-00805f9b34fb"));
-        byte[] batteryLevelData = new byte[] { 98 }; // 假設電量 98%
+        final ParcelUuid deviceInfoServiceUuid = new ParcelUuid(UUID.fromString("0000180A-0000-1000-8000-00805f9b34fb"));
+        final ParcelUuid currentTimeServiceUuid = new ParcelUuid(UUID.fromString("00001805-0000-1000-8000-00805f9b34fb"));
+        final ParcelUuid amsServiceUuid = new ParcelUuid(UUID.fromString("89D3502B-0F36-433A-8EF4-C502AD55F8DC"));
 
-        // 測試1：只有 16-bit UUID 的 Service Data
-        int sizeWith16Bit = calculateAdvertiseDataSize(
+
+        // --- 測試 1: 計算您目前 `data` 封包的大小 ---
+        List<ParcelUuid> dataServiceUuids = new ArrayList<>();
+        dataServiceUuids.add(batteryServiceUuid);
+        dataServiceUuids.add(deviceInfoServiceUuid);
+        dataServiceUuids.add(currentTimeServiceUuid);
+
+        int dataPacketSize = calculateAdvertiseDataSize(
                 false, // includeDeviceName
                 false, // includeTxPower
-                batteryServiceUuid, // The UUID for the service data
-                batteryLevelData  // The service data itself
+                appleCompanyId, // manufacturerId
+                manufacturerDataBytes, // manufacturerData
+                dataServiceUuids, // serviceUuids
+                serviceDataUuid, // serviceDataUuid
+                serviceDataBytes // serviceData
         );
-        // 預期結果: 3 (Flags) + [1(Len) + 1(Type) + 2(UUID) + 1(Data)] = 3 + 5 = 8 bytes
-        Log.d("BLE_TEST", "16-bit Service Data ONLY: " + sizeWith16Bit + " bytes (Expected: 8)");
+        /*
+         * 預期計算:
+         * Flags: 3 bytes
+         * Manufacturer Data (Apple): 2(hdr) + 2(id) + 4(data) = 8 bytes
+         * Service Data (FEA0): 2(hdr) + 2(uuid) + 1(data) = 5 bytes
+         * Service UUIDs (16-bit list): 2(hdr) + 3 * 2(uuids) = 8 bytes
+         * 總計: 3 + 8 + 5 + 8 = 24 bytes
+         */
+        Log.d("BLE_TEST", "Current 'data' packet size: " + dataPacketSize + " bytes (Expected: 24)");
+        if (dataPacketSize > 31) {
+            Log.e("BLE_TEST", "WARNING: 'data' packet is TOO LARGE!");
+        }
 
-        // 測試2：只有 128-bit UUID 的 Service Data
-        int sizeWith128Bit = calculateAdvertiseDataSize(
+        // --- 測試 2: 計算您目前 `response` 封包的大小 ---
+        List<ParcelUuid> responseServiceUuids = new ArrayList<>();
+        responseServiceUuids.add(amsServiceUuid);
+
+        int responsePacketSize = calculateAdvertiseDataSize(
                 false, // includeDeviceName
                 false, // includeTxPower
-                demouuid, // The UUID for the service data
-                batteryLevelData // The service data itself
+                -1, // manufacturerId
+                null, // manufacturerData
+                responseServiceUuids, // serviceUuids
+                null, // serviceDataUuid
+                null // serviceData
         );
-        // 預期結果: 3 (Flags) + [1(Len) + 1(Type) + 16(UUID) + 1(Data)] = 3 + 19 = 22 bytes
-        Log.d("BLE_TEST", "128-bit Service Data ONLY: " + sizeWith128Bit + " bytes (Expected: 22)");
-        Log.d("BLE_TEST", "--- End of Calculation Tests ---");
+        /*
+         * 預期計算:
+         * Flags: 3 bytes
+         * Service UUIDs (128-bit list): 2(hdr) + 1 * 16(uuid) = 18 bytes
+         * 總計: 3 + 18 = 21 bytes
+         */
+        Log.d("BLE_TEST", "Current 'response' packet size: " + responsePacketSize + " bytes (Expected: 21)");
+        if (responsePacketSize > 31) {
+            Log.e("BLE_TEST", "WARNING: 'response' packet is TOO LARGE!");
+        }
+
+        // --- 測試 3: 模擬一個會超限的失敗案例 ---
+        List<ParcelUuid> tooLargeServiceUuids = new ArrayList<>();
+        tooLargeServiceUuids.add(amsServiceUuid);
+        tooLargeServiceUuids.add(batteryServiceUuid);
+        tooLargeServiceUuids.add(deviceInfoServiceUuid);
+        tooLargeServiceUuids.add(currentTimeServiceUuid);
+
+        int failedPacketSize = calculateAdvertiseDataSize(
+                false, false, -1, null,
+                tooLargeServiceUuids,
+                null, null
+        );
+        /*
+         * 預期計算:
+         * Flags: 3 bytes
+         * 128-bit List: 18 bytes
+         * 16-bit List: 2 + 3*2 = 8 bytes
+         * 總計: 3 + 18 + 8 = 29 bytes
+         * 註: 雖然是 29，但這就是我們之前討論過會失敗的臨界情況。
+         */
+        Log.d("BLE_TEST", "Simulated 'failed' packet size: " + failedPacketSize + " bytes (Expected: 29)");
+        if (failedPacketSize > 31) {
+            Log.e("BLE_TEST", "As expected, the simulated packet is TOO LARGE!");
+        } else {
+            Log.w("BLE_TEST", "Simulated packet is " + failedPacketSize + " bytes. This is a critical size where silent failure can occur on some devices.");
+        }
+        Log.d("BLE_TEST", "--- End of New Calculation Tests ---");
     }
 
     /**
-     * Pre-calculates the size of the AdvertiseData payload.
+     * 精確預先計算 AdvertiseData 封包的最終大小。
+     * 這個函式模擬 AdvertiseData.Builder 的打包行為，包括 Flags、多個 UUID 列表和 Service Data。
+     *
+     * @param includeDeviceName 是否包含裝置名稱。
+     * @param includeTxPower    是否包含發射功率。
+     * @param manufacturerId    廠商 ID，如果為 -1 則不加入。
+     * @param manufacturerData  廠商特定資料。
+     * @param serviceUuids      要廣播的服務 UUID 列表 (對應 addServiceUuid)。
+     * @param serviceDataUuid   用於 Service Data 的 UUID (對應 addServiceData 的第一個參數)。
+     * @param serviceData       要附加的 Service Data (對應 addServiceData 的第二個參數)。
+     * @return 計算出的封包大小（位元組）。
      */
-    private int calculateAdvertiseDataSize(boolean includeDeviceName, boolean includeTxPower, ParcelUuid uuid, byte[] serviceData) {
-        // Flags are always added by the builder.
-        int size = 3; // 1 (length) + 1 (type) + 1 (data) for Flags
+    private int calculateAdvertiseDataSize(
+            boolean includeDeviceName,
+            boolean includeTxPower,
+            int manufacturerId,
+            byte[] manufacturerData,
+            List<ParcelUuid> serviceUuids,
+            ParcelUuid serviceDataUuid,
+            byte[] serviceData) {
 
-        // 2. Tx Power Level
-        if (includeTxPower) {
-            // 1 (length) + 1 (type) + 1 (data)
-            size += 3;
-        }
+        // 1. Flags: Android 系統總是會加入 Flags AD 結構。
+        int size = 3; // 1 (Length) + 1 (Type 0x01) + 1 (Data)
 
-        // 3. Device Name
+        // 2. 裝置名稱 (AD Type 0x09 - Complete Local Name)
         if (includeDeviceName) {
             BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
             String deviceName = adapter.getName();
             if (deviceName != null && !deviceName.isEmpty()) {
-                size += (2 + deviceName.getBytes(Charset.forName("UTF-8")).length); // 1 for length, 1 for type
+                size += (2 + deviceName.getBytes(Charset.defaultCharset()).length);
             }
         }
-        // 4. Service UUID (from .addServiceUuid)
-        // --- 計算 Service UUID (AD Type 0x07) ---
-        // This is added as a separate field by the builder.
-        if (uuid != null) {
-            // AD Structure: [Length] [Type 0x07] [UUID Data]
-            // This calculation assumes a list of 128-bit UUIDs.
-            size += 18; // 1 (Length) + 1 (Type) + 16 (UUID)
+
+        // 3. 發射功率 (AD Type 0x0A - Tx Power Level)
+        if (includeTxPower) {
+            size += 3; // 1 (Length) + 1 (Type) + 1 (Data)
         }
 
-        // 5. Service Data (from .addServiceData)
-        // --- 計算 Service UUID (AD Type 0x07) ---
-        // --- 計算 Service Data (AD Type 0x21) ---
-        if (serviceData != null && uuid != null) {
-            // AD Structure: [Length] [Type] [Service Data UUID] [Service Data]
-            // Service Data: 1 (length) + 1 (type) + 2 (UUID for data) + data length
-            // Length = 1 (Type) + 16 (128-bit UUID) + serviceData.length
-            // Total size = 1 (Length byte) + Length
-            // Note: For ServiceData, the UUID is often shortened to 16-bit if possible,
-            // but let's assume the full UUID is part of the data identification.
-            // A more precise calculation depends on the AD type used (0x16 for 16-bit UUID, etc.)
-            // For simplicity, let's just add the data length plus overhead.
-//            size += (1 + 1 + 2 + serviceData.length);
-            int uuidSizeInServiceData  = getServiceDataUuidSize(uuid); // Can be 2, 4, or 16
-            // The length of the data part of the AD Structure
-            // (1 for AD Type + size of UUID + size of data)
-            int dataPartLength = 1 + uuidSizeInServiceData + serviceData.length;
-            // The total size for this structure is 1 (for the length field) + dataPartLength
-            size += (1 + dataPartLength);
+        // 4. 廠商特定資料 (AD Type 0xFF - Manufacturer Specific Data)
+        if (manufacturerId != -1 && manufacturerData != null) {
+            // 1 (Length) + 1 (Type) + 2 (Company ID) + data length
+            size += (2 + 2 + manufacturerData.length);
+        }
+
+        // 5. Service UUID 列表 (AD Types 0x03, 0x07)
+        // Builder 會將 UUID 分類成 16-bit 和 128-bit 兩個列表。
+        if (serviceUuids != null && !serviceUuids.isEmpty()) {
+            List<ParcelUuid> uuids16 = new ArrayList<>();
+            List<ParcelUuid> uuids128 = new ArrayList<>();
+
+            for (ParcelUuid uuid : serviceUuids) {
+                if (is16BitUuid(uuid)) {
+                    uuids16.add(uuid);
+                } else {
+                    uuids128.add(uuid);
+                }
+            }
+            // 計算 16-bit UUID 列表的大小
+            if (!uuids16.isEmpty()) {
+                // 1 (Length) + 1 (Type 0x03) + (N * 2 bytes)
+                size += (2 + uuids16.size() * 2);
+            }
+            // 計算 128-bit UUID 列表的大小
+            if (!uuids128.isEmpty()) {
+                // 1 (Length) + 1 (Type 0x07) + (N * 16 bytes)
+                size += (2 + uuids128.size() * 16);
+            }
+        }
+
+        // 6. Service Data (AD Type 0x16 for 16-bit UUID, 0x21 for 128-bit UUID)
+        if (serviceDataUuid != null && serviceData != null) {
+            if (is16BitUuid(serviceDataUuid)) {
+                // 1 (Length) + 1 (Type 0x16) + 2 (UUID) + data length
+                size += (2 + 2 + serviceData.length);
+            } else {
+                // 1 (Length) + 1 (Type 0x21) + 16 (UUID) + data length
+                size += (2 + 16 + serviceData.length);
+            }
         }
         return size;
     }
 
     /**
-     * Helper method to determine the byte size of a ParcelUuid for service data.
-     * Returns 2 for 16-bit, 4 for 32-bit, and 16 for 128-bit UUIDs.
+     * 輔助函式，檢查一個 ParcelUuid 是否為 16-bit 標準 UUID。
+     * 標準 UUID 的格式為 0000xxxx-0000-1000-8000-00805f9b34fb。
      */
-    private int getServiceDataUuidSize(ParcelUuid parcelUuid) {
-        final UUID uuid = parcelUuid.getUuid();
-        long lsb = uuid.getLeastSignificantBits();
-        long msb = uuid.getMostSignificantBits();
-        final long BLE_BASE_UUID_LSB = 0x800000805F9B34FBL;
-        final long BLE_BASE_UUID_MSB = 0x0000000000001000L;
-
-        if (lsb == BLE_BASE_UUID_LSB && (msb & 0xFFFF0000FFFFFFFFL) == BLE_BASE_UUID_MSB) {
-            // This is a 16-bit or 32-bit UUID
-            if ((msb & 0x0000FFFF00000000L) == 0) {
-                return 2; // 16-bit
-            } else {
-                return 4; // 32-bit
-            }
-        }
-        return 16; // 128-bit
+    private boolean is16BitUuid(ParcelUuid parcelUuid) {
+        UUID uuid = parcelUuid.getUuid();
+        // 比較最高 64 位和最低 64 位是否符合藍牙基礎 UUID
+        return (uuid.getMostSignificantBits() & 0xFFFF0000FFFFFFFFL) == 0x0000000000001000L &&
+                uuid.getLeastSignificantBits() == 0x800000805f9b34fbL;
     }
 }
