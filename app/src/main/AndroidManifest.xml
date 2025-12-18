@@ -1,22 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
+    <!-- 舊版藍牙權限 (Android 11 及以下) -->
     <uses-permission android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
         android:maxSdkVersion="30" />
 
-    <!-- 定位權限 -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-
+    <!-- 舊版掃描所需的位置權限 (Android 11 及以下) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30"/>
+    <!-- 雖然掃描通常需要 FINE，但為了相容性也宣告 COARSE，並限制版本 -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"
+        android:maxSdkVersion="30"/>
     <!-- 新版藍牙權限 (Android 12 / API 31 及以上) -->
+    <!-- 如果您的應用掃描結果不用於推斷物理位置，請加入 neverForLocation -->
+    <!-- 這可以讓您在不請求位置權限的情況下進行掃描 -->
+    <!-- 掃描權限。neverForLocation 標誌讓我們可以不用請求位置權限。 -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
-        tools:remove="android:maxSdkVersion" />
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
+    <!-- 廣播權限 -->
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"
-        tools:remove="android:maxSdkVersion" />
+        tools:targetApi="s"/>
+    <!-- 連接權限 -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"
-        tools:remove="android:maxSdkVersion" />
+        tools:targetApi="s"/>
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>
     <application
         android:allowBackup="true"

@@ -2,6 +2,7 @@ package com.tutsplus.bleadvertising;
 
 import android.Manifest;
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothManager;
 import android.bluetooth.le.AdvertiseCallback;
 import android.bluetooth.le.AdvertiseData;
 import android.bluetooth.le.AdvertiseSettings;
@@ -24,8 +25,10 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.RequiresPermission;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
+import androidx.lifecycle.Observer;
 import androidx.lifecycle.ViewModelProvider;
 
 import com.tutsplus.bleadvertising.databinding.ActivityMainBinding;
@@ -39,17 +42,13 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 public class MainActivity extends AppCompatActivity {
-    private static final String TAG = "MainActivity_BLE";
-    private static final long SCAN_PERIOD_SECONDS = 10;
+    private static final String TAG = "MainActivity";
 
     private ActivityMainBinding binding;
     private BleViewModel bleViewModel;
-
-    // 藍牙核心元件保留在 Activity
     private BluetoothAdapter bluetoothAdapter;
     private BluetoothLeScanner bleScanner;
     private BluetoothLeAdvertiser bleAdvertiser;
-
     private final ActivityResultLauncher<String[]> requestPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), this::onPermissionsResult);
 
@@ -58,44 +57,17 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
-
         bleViewModel = new ViewModelProvider(this).get(BleViewModel.class);
-
         if (!initBluetooth()) {
             disableAllButtons();
             return;
         }
-
-        checkAndRequestPermissions();
-        setupClickListeners();
-        setupObservers();
-    }
-
-    @Override
-    protected void onStop() {
-        super.onStop();
-        if (bleViewModel.bleState.getValue() != BleState.IDLE) {
-            Log.w(TAG, "Force stopping BLE actions in onStop()");
-            bleViewModel.updateState(BleState.IDLE);
-        }
-    }
-
-    private boolean initBluetooth() {
-        bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
-        if (bluetoothAdapter == null) {
-            Toast.makeText(this, "此裝置不支援藍牙", Toast.LENGTH_LONG).show();
-            return false;
-        }
-        return true;
-    }
-
-    private void setupClickListeners() {
         binding.discoverBtn.setOnClickListener(v -> {
             BleState currentState = bleViewModel.bleState.getValue();
             if (currentState == BleState.SCANNING) {
                 bleViewModel.updateState(BleState.IDLE);
             } else if (currentState == BleState.IDLE) {
-                bleViewModel.updateState(BleState.SCANNING);
+                bleViewModel.updateState(BleState.START_SCAN);
             }
         });
 
@@ -104,13 +76,47 @@ public class MainActivity extends AppCompatActivity {
             if (currentState == BleState.ADVERTISING) {
                 bleViewModel.updateState(BleState.IDLE);
             } else if (currentState == BleState.IDLE) {
-                bleViewModel.updateState(BleState.ADVERTISING);
+                bleViewModel.updateState(BleState.START_ADVERTISE);
             }
         });
-    }
 
-    private void setupObservers() {
-        bleViewModel.bleState.observe(this, this::onBleStateChanged);
+        bleViewModel.bleState.observe(this, new Observer<BleState>() {
+            @Override
+            public void onChanged(@NonNull BleState state) {
+                Log.d(TAG, "State changed to: " + state);
+                switch (state) {
+                    case IDLE:
+                        stopBleScan();
+                        stopBleAdvertising();
+                        updateUiForIdleState();
+                        break;
+                    case START_SCAN:
+                        stopBleAdvertising();
+                        updateUiForScanningState();
+                        startBleScan();
+                        break;
+                    case SCANNING:
+                        Toast.makeText(getBaseContext(), "掃描已開始", Toast.LENGTH_SHORT).show();
+                        break;
+                    case  START_ADVERTISE:
+                        stopBleScan();
+                        updateUiForAdvertisingState();
+                        startBleAdvertising();
+                        break;
+                    case ADVERTISING:
+                        Toast.makeText(getBaseContext(), "廣播已開始", Toast.LENGTH_SHORT).show();
+                        break;
+                    case SCAN_STOPPING:
+                        bleViewModel.updateState(BleState.IDLE);
+                        break;
+                    case FAILURE:
+                        stopBleScan();
+                        stopBleAdvertising();
+                        updateUiForIdleState();
+                        break;
+                }
+            }
+        });
 
         bleViewModel.scanResultText.observe(this, text -> {
             if (bleViewModel.bleState.getValue() == BleState.SCANNING && !TextUtils.isEmpty(text)) {
@@ -124,36 +130,15 @@ public class MainActivity extends AppCompatActivity {
             }
         });
     }
-
-    private void onBleStateChanged(@NonNull BleState state) {
-        Log.d(TAG, "State changed to: " + state);
-        switch (state) {
-            case IDLE:
-                stopBleScan();
-                stopBleAdvertising();
-                updateUiForIdleState();
-                break;
-            case SCANNING:
-                stopBleAdvertising();
-                updateUiForScanningState();
-                startBleScan();
-                break;
-            case ADVERTISING:
-                stopBleScan();
-                updateUiForAdvertisingState();
-                startBleAdvertising();
-                break;
-            case SCAN_STOPPING:
-                bleViewModel.updateState(BleState.IDLE);
-                break;
-            case FAILURE:
-                stopBleScan();
-                stopBleAdvertising();
-                updateUiForIdleState();
-                break;
+    private boolean initBluetooth() {
+        bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+        if (bluetoothAdapter == null) {
+            Toast.makeText(this, "此裝置不支援藍牙", Toast.LENGTH_LONG).show();
+            return false;
         }
+        return true;
     }
-
+    @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
     private void startBleScan() {
         if (!areScanPermissionsGranted()) {
             bleViewModel.postToastMessage("缺少藍牙掃描權限");
@@ -180,14 +165,13 @@ public class MainActivity extends AppCompatActivity {
         try {
             bleScanner.startScan(filters, settings, scanCallback);
             Log.i(TAG, "BLE scan started.");
-            startScanTimerThread();
+            bleViewModel.updateState(BleState.SCANNING);
         } catch (SecurityException e) {
             Log.e(TAG, "無法開始掃描，缺少權限", e);
             bleViewModel.postToastMessage("缺少權限，無法開始掃描");
             bleViewModel.updateState(BleState.FAILURE);
         }
     }
-
     private void stopBleScan() {
         if (bleScanner != null && bluetoothAdapter.isEnabled() && areScanPermissionsGranted()) {
             try {
@@ -398,26 +382,10 @@ public class MainActivity extends AppCompatActivity {
         binding.discoverBtn.setEnabled(false);
         binding.advertiseBtn.setEnabled(false);
     }
-
-    private void startScanTimerThread() {
-        new Thread(() -> {
-            try {
-                Log.d(TAG, "Scan timer thread started, will stop in " + SCAN_PERIOD_SECONDS + " seconds.");
-                boolean finished = new CountDownLatch(1).await(SCAN_PERIOD_SECONDS, TimeUnit.SECONDS);
-                if (!finished && bleViewModel.bleState.getValue() == BleState.SCANNING) {
-                    Log.d(TAG, "Scan timer finished. Requesting scan stop.");
-                    bleViewModel.updateState(BleState.SCAN_STOPPING);
-                }
-            } catch (InterruptedException e) {
-                Log.w(TAG, "Scan timer thread interrupted.", e);
-                Thread.currentThread().interrupt();
-            }
-        }).start();
-    }
-
     private final ScanCallback scanCallback = new ScanCallback() {
         @Override
         public void onScanResult(int callbackType, ScanResult result) {
+            Log.e("MainActivity", "onScanResult : " + result);
             if (result == null || result.getDevice() == null) return;
             String deviceName;
             try {
@@ -437,7 +405,6 @@ public class MainActivity extends AppCompatActivity {
 
         @Override
         public void onScanFailed(int errorCode) {
-            Log.e(TAG, "Scan onScanFailed: " + errorCode);
             bleViewModel.postToastMessage("掃描失敗: " + errorCode);
             bleViewModel.updateState(BleState.FAILURE);
         }
@@ -447,8 +414,8 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onStartSuccess(AdvertiseSettings settingsInEffect) {
             super.onStartSuccess(settingsInEffect);
-            Log.i(TAG, "Advertising onStartSuccess.");
-            bleViewModel.postToastMessage("廣播已開始");
+            bleViewModel.updateState(BleState.ADVERTISING);
+            Log.i(TAG, "Advertising onStartSuccess."+settingsInEffect);
         }
 
         @Override
@@ -468,8 +435,7 @@ public class MainActivity extends AppCompatActivity {
     /**
      * 【關鍵修正】恢復您原始的、能夠正確識別 SIG 16-bit UUID 的函式。
      */
-    private boolean is16BitUuid(ParcelUuid parcelUuid) {
-        UUID uuid = parcelUuid.getUuid();
+    private boolean is16BitUuid(UUID uuid) {
         return (uuid.getMostSignificantBits() & 0xFFFF0000FFFFFFFFL) == 0x0000000000001000L &&
                 uuid.getLeastSignificantBits() == 0x800000805f9b34fbL;
     }
@@ -505,7 +471,7 @@ public class MainActivity extends AppCompatActivity {
             List<ParcelUuid> uuids16 = new ArrayList<>();
             List<ParcelUuid> uuids128 = new ArrayList<>();
             for (ParcelUuid uuid : serviceUuids) {
-                if (is16BitUuid(uuid)) {
+                if (is16BitUuid(uuid.getUuid())) {
                     uuids16.add(uuid);
                 } else {
                     uuids128.add(uuid);
@@ -521,7 +487,7 @@ public class MainActivity extends AppCompatActivity {
 
         if (serviceDataUuid != null && serviceData != null) {
             int dataLen = serviceData.length;
-            if (is16BitUuid(serviceDataUuid)) {
+            if (is16BitUuid(serviceDataUuid.getUuid())) {
                 size += (2 + 2 + dataLen);
             } else {
                 size += (2 + 16 + dataLen);
@@ -576,57 +542,72 @@ public class MainActivity extends AppCompatActivity {
 
 
     // --- 權限管理 ---
-    private void onPermissionsResult(Map<String, Boolean> permissions) {
-        boolean allGranted = true;
-        for (Boolean granted : permissions.values()) {
-            if (!granted) {
-                allGranted = false;
-                break;
+    private void onPermissionsResult(Map<String, Boolean> result) {
+        // 重新檢查我們關心的掃描和廣播權限是否已獲取
+        boolean scanGranted = areScanPermissionsGranted();
+        boolean advertiseGranted = areAdvertisePermissionsGranted();
+
+        if (scanGranted && advertiseGranted) {
+            Log.d(TAG, "所有必要的藍牙權限均已授予。");
+            // 如果使用者剛授予權限，可以根據當前狀態決定是否自動開始操作
+            BleState currentState = bleViewModel.bleState.getValue();
+            if (currentState == BleState.START_SCAN) {
+                startBleScan();
+            } else if (currentState == BleState.START_ADVERTISE) {
+                startBleAdvertising();
             }
-        }
-        if (allGranted) {
-            bleViewModel.postToastMessage("所有必要權限已授予");
-            bleViewModel.updateState(BleState.IDLE);
         } else {
-            bleViewModel.postToastMessage("部分或所有藍牙權限被拒絕，功能將受限");
-            disableAllButtons();
+            Log.w(TAG, "部分或全部藍牙權限被拒絕。 Scan granted: " + scanGranted + ", Advertise granted: " + advertiseGranted);
+            bleViewModel.postToastMessage("權限被拒絕，功能可能受限");
+            bleViewModel.updateState(BleState.FAILURE); // 更新為失敗狀態
         }
     }
 
+
     private void checkAndRequestPermissions() {
         List<String> permissionsToRequest = new ArrayList<>();
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            permissionsToRequest.add(Manifest.permission.BLUETOOTH_SCAN);
-            permissionsToRequest.add(Manifest.permission.BLUETOOTH_ADVERTISE);
-            permissionsToRequest.add(Manifest.permission.BLUETOOTH_CONNECT);
-        } else {
-            permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION);
-        }
-        List<String> permissionsNeeded = new ArrayList<>();
-        for (String p : permissionsToRequest) {
-            if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) {
-                permissionsNeeded.add(p);
+            // Android 12+
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.BLUETOOTH_SCAN);
             }
-        }
-        if (!permissionsNeeded.isEmpty()) {
-            requestPermissionLauncher.launch(permissionsNeeded.toArray(new String[0]));
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.BLUETOOTH_ADVERTISE);
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.BLUETOOTH_CONNECT);
+            }
         } else {
-            bleViewModel.updateState(BleState.IDLE);
+            // Android 11 及以下
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION);
+            }
+            // BLUETOOTH 和 BLUETOOTH_ADMIN 是安裝時權限，不需要在執行時請求
+        }
+
+        if (!permissionsToRequest.isEmpty()) {
+            Log.d(TAG, "正在請求權限: " + permissionsToRequest);
+            requestPermissionLauncher.launch(permissionsToRequest.toArray(new String[0]));
         }
     }
 
     private boolean areScanPermissionsGranted() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Android 12 (API 31) 及以上版本需要 BLUETOOTH_SCAN
             return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED;
         } else {
+            // Android 11 (API 30) 及以下版本需要 ACCESS_FINE_LOCATION
             return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         }
     }
 
     private boolean areAdvertisePermissionsGranted() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Android 12 (API 31) 及以上版本需要 BLUETOOTH_ADVERTISE
             return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED;
         } else {
+            // 廣播在舊版中不需要特定權限，始終返回 true
             return true;
         }
     }
@@ -658,5 +639,20 @@ public class MainActivity extends AppCompatActivity {
             bytes[i] = (byte) (lsb >>> (8 * (7 - (i - 8))));
         }
         return bytes;
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        checkAndRequestPermissions();
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+//        if (bleViewModel.bleState.getValue() != BleState.IDLE) {
+//            Log.w(TAG, "Force stopping BLE actions in onStop()");
+//            bleViewModel.updateState(BleState.IDLE);
+//        }
     }
 }
