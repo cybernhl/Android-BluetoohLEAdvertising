@@ -106,17 +106,28 @@ public class ServicesManager {
             int batteryLevel = 80;
             boolean increasing = true;
             while (isSimulating) {
-                if (increasing) {
-                    batteryLevel++;
-                    if (batteryLevel >= 100) increasing = false;
-                } else {
-                    batteryLevel--;
-                    if (batteryLevel <= 20) increasing = true;
-                }
+//                if (increasing) {
+//                    batteryLevel++;
+//                    if (batteryLevel >= 100) increasing = false;
+//                } else {
+//                    batteryLevel--;
+//                    if (batteryLevel <= 20) increasing = true;
+//                }
+//                batteryLevelCharacteristic.setValue(new byte[]{(byte) batteryLevel});
+//                notifyCharacteristicChanged(batteryLevelCharacteristic, false); // Notification
+//                try {
+//                    Thread.sleep(10000); // 每 5 秒更新一次
+//                } catch (InterruptedException e) {
+//                    Thread.currentThread().interrupt();
+//                }
+                 batteryLevel = 20 + random.nextInt(80);
+
                 batteryLevelCharacteristic.setValue(new byte[]{(byte) batteryLevel});
                 notifyCharacteristicChanged(batteryLevelCharacteristic, false); // Notification
+
                 try {
-                    Thread.sleep(5000); // 每 5 秒更新一次
+                    // 更新間隔維持不變，例如每 10 秒更新一次
+                    Thread.sleep(30000);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
@@ -132,7 +143,7 @@ public class ServicesManager {
                 heartRateMeasurementCharacteristic.setValue(new byte[]{0b00001000, (byte) heartRate, 0, 0});
                 notifyCharacteristicChanged(heartRateMeasurementCharacteristic, false); // Notification
                 try {
-                    Thread.sleep(1000); // 每 1 秒更新一次
+                    Thread.sleep(29000);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
@@ -149,7 +160,7 @@ public class ServicesManager {
                 temperatureMeasurementCharacteristic.setValue(bits, BluetoothGattCharacteristic.FORMAT_FLOAT, 1);
                 notifyCharacteristicChanged(temperatureMeasurementCharacteristic, true); // Indication
                 try {
-                    Thread.sleep(10000); // 每 10 秒更新一次
+                    Thread.sleep(60000); // 每 10 秒更新一次
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
