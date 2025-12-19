@@ -54,7 +54,10 @@ public class BleViewModel extends ViewModel {
         }
         this.gattServer = server;
         this.connectedDevices.clear(); // 確保開始時是乾淨的狀態
-        Log.i(TAG, "GATT Server 已經成功注入到 ViewModel。");
+        ServicesManager.getInstance().setGattServer(this.gattServer, this.connectedDevices);
+        ServicesManager.getInstance().startSimulation(); // 開始模擬數據
+
+        Log.i(TAG, "GATT Server 已經成功注入到 ViewModel 並設定到 ServicesManager。");
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
@@ -173,6 +176,7 @@ public class BleViewModel extends ViewModel {
     @Override
     protected void onCleared() {
         super.onCleared();
+        ServicesManager.getInstance().stopSimulation();
         if (this.gattServer != null) {
             Log.d(TAG, "ViewModel onCleared : GATT Server  ");
             try {

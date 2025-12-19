@@ -207,11 +207,8 @@ public class MainActivity extends AppCompatActivity {
             checkAndRequestPermissions();
             return;
         }
-        final BluetoothGattService batteryService = createBatteryService();
-        final BluetoothGattService heartRateService = createHeartRateService(); // 建立心率服務
-        final BluetoothGattService healthThermometerService = createHealthThermometerService(); // 建立溫度計服務
-        final BluetoothGattService deviceInfoService = createDeviceInfoService();
-        final BluetoothGattService currentTimeService = createCurrentTimeService();
+        List<BluetoothGattService> services = ServicesManager.getInstance().getAllServices();
+
 
         if (areConnectPermissionsGranted()) {
             try {
@@ -220,13 +217,9 @@ public class MainActivity extends AppCompatActivity {
                     Log.e(TAG, "無法開啟 GATT 伺服器");
                 } else {
                     bleViewModel.setupGattServerLogic(gattServer);
-
-                    bleViewModel.addGattService(batteryService);
-                    bleViewModel.addGattService(heartRateService);
-                    bleViewModel.addGattService(healthThermometerService);
-                    bleViewModel.addGattService(deviceInfoService);
-                    bleViewModel.addGattService(currentTimeService);
-
+                    for (BluetoothGattService service : services) {
+                        bleViewModel.addGattService(service);
+                    }
                 }
             } catch (SecurityException e) {
                 Log.e(TAG, "建立 GATT 伺服器失敗，缺少權限", e);
@@ -287,8 +280,8 @@ public class MainActivity extends AppCompatActivity {
             final ParcelUuid serviceDataUuid = new ParcelUuid(UUID.fromString("0000FEA0-0000-1000-8000-00805f9b34fb"));
             final UUID BATTERY_SERVICE_UUID = UUID.fromString("0000180F-0000-1000-8000-00805f9b34fb");
             final ParcelUuid batteryServiceUuid = new ParcelUuid(BATTERY_SERVICE_UUID);
-            final ParcelUuid heartRateServiceUuid = new ParcelUuid(heartRateService.getUuid());
-            final ParcelUuid healthThermometerServiceUuid = new ParcelUuid(healthThermometerService.getUuid());
+//            final ParcelUuid heartRateServiceUuid = new ParcelUuid(heartRateService.getUuid());
+//            final ParcelUuid healthThermometerServiceUuid = new ParcelUuid(healthThermometerService.getUuid());
 
             final ParcelUuid deviceInfoServiceUuid = new ParcelUuid(UUID.fromString("0000180A-0000-1000-8000-00805f9b34fb"));
             final ParcelUuid currentTimeServiceUuid = new ParcelUuid(UUID.fromString("00001805-0000-1000-8000-00805f9b34fb"));
@@ -404,244 +397,6 @@ public class MainActivity extends AppCompatActivity {
         }
         bleAdvertiser = null;
     }
-
-
-    private BluetoothGattService createBatteryService() {
-        final UUID BATTERY_SERVICE_UUID = UUID.fromString("0000180F-0000-1000-8000-00805f9b34fb");
-        final UUID BATTERY_LEVEL_UUID = UUID.fromString("00002A19-0000-1000-8000-00805f9b34fb");
-        final UUID CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
-        final UUID CHARACTERISTIC_USER_DESCRIPTION_UUID = UUID.fromString("00002901-0000-1000-8000-00805f9b34fb");
-        final UUID CLIENT_CHARACTERISTIC_CONFIGURATION_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
-        final String BATTERY_LEVEL_DESCRIPTION = "The current charge level of a battery. 100% represents fully charged while 0% represents fully discharged.";
-        // 1. 建立特徵
-        BluetoothGattCharacteristic batteryLevelCharacteristic = new BluetoothGattCharacteristic(
-                BATTERY_LEVEL_UUID,
-                BluetoothGattCharacteristic.PROPERTY_READ | BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-                BluetoothGattCharacteristic.PERMISSION_READ
-        );
-        batteryLevelCharacteristic.setValue(new byte[]{(byte) 80}); // 初始電量 80%
-
-        // 2. 建立 CCCD 描述符並加入特徵
-        BluetoothGattDescriptor cccDescriptor = new BluetoothGattDescriptor(
-                CCCD_UUID,
-                BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE
-        );
-        cccDescriptor.setValue(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE);
-        batteryLevelCharacteristic.addDescriptor(cccDescriptor);
-
-        // 可選: 加入用戶描述
-        // final UUID USER_DESC_UUID = UUID.fromString("00002901-0000-1000-8000-00805f9b34fb");
-        // BluetoothGattDescriptor userDescriptor = new BluetoothGattDescriptor(USER_DESC_UUID, BluetoothGattDescriptor.PERMISSION_READ);
-        // try {
-        //     userDescriptor.setValue(BATTERY_LEVEL_DESCRIPTION.getBytes("UTF-8"));
-        //     batteryLevelCharacteristic.addDescriptor(userDescriptor);
-        // } catch (UnsupportedEncodingException e) {
-        //     Log.e(TAG, "無法設定用戶描述", e);
-        // }
-
-        // 3. 建立服務並加入特徵
-        BluetoothGattService batteryService = new BluetoothGattService(BATTERY_SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY);
-        batteryService.addCharacteristic(batteryLevelCharacteristic);
-
-        return batteryService;
-    }
-
-    private BluetoothGattService createHeartRateService() {
-        final UUID HEART_RATE_SERVICE_UUID = UUID.fromString("0000180D-0000-1000-8000-00805f9b34fb");
-        final UUID HEART_RATE_MEASUREMENT_UUID = UUID.fromString("00002A37-0000-1000-8000-00805f9b34fb");
-        final UUID BODY_SENSOR_LOCATION_UUID = UUID.fromString("00002A38-0000-1000-8000-00805f9b34fb");
-        final UUID HEART_RATE_CONTROL_POINT_UUID = UUID.fromString("00002A39-0000-1000-8000-00805f9b34fb");
-        final UUID CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
-
-        // 建立服務
-        BluetoothGattService heartRateService = new BluetoothGattService(HEART_RATE_SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY);
-
-        // 1. 心率測量特徵 (Heart Rate Measurement Characteristic)
-        BluetoothGattCharacteristic heartRateMeasurementCharacteristic = new BluetoothGattCharacteristic(
-                HEART_RATE_MEASUREMENT_UUID,
-                BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-                0 // 無權限，因為它是通知
-        );
-        // 加入 CCCD 以啟用通知
-        heartRateMeasurementCharacteristic.addDescriptor(new BluetoothGattDescriptor(CCCD_UUID, BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE));
-        // 設定初始值 (Flags: UINT8, Sensor Not Connected, Energy Expended Present)
-        heartRateMeasurementCharacteristic.setValue(new byte[]{0b00001000, 60, 0, 0}); // 初始心率 60, 能量 0
-        heartRateService.addCharacteristic(heartRateMeasurementCharacteristic);
-
-        // 2. 身體感測器位置特徵 (Body Sensor Location Characteristic)
-        BluetoothGattCharacteristic bodySensorLocationCharacteristic = new BluetoothGattCharacteristic(
-                BODY_SENSOR_LOCATION_UUID,
-                BluetoothGattCharacteristic.PROPERTY_READ,
-                BluetoothGattCharacteristic.PERMISSION_READ
-        );
-        bodySensorLocationCharacteristic.setValue(new byte[]{0x01}); // 初始位置: 胸部 (Chest)
-        heartRateService.addCharacteristic(bodySensorLocationCharacteristic);
-
-        // 3. 心率控制點特徵 (Heart Rate Control Point Characteristic)
-        BluetoothGattCharacteristic heartRateControlPointCharacteristic = new BluetoothGattCharacteristic(
-                HEART_RATE_CONTROL_POINT_UUID,
-                BluetoothGattCharacteristic.PROPERTY_WRITE,
-                BluetoothGattCharacteristic.PERMISSION_WRITE
-        );
-        heartRateService.addCharacteristic(heartRateControlPointCharacteristic);
-
-        return heartRateService;
-    }
-
-    private BluetoothGattService createHealthThermometerService() {
-        final UUID HEALTH_THERMOMETER_SERVICE_UUID = UUID.fromString("00001809-0000-1000-8000-00805f9b34fb");
-        final UUID TEMPERATURE_MEASUREMENT_UUID = UUID.fromString("00002A1C-0000-1000-8000-00805f9b34fb");
-        final UUID MEASUREMENT_INTERVAL_UUID = UUID.fromString("00002A21-0000-1000-8000-00805f9b34fb"); // 新增：測量間隔 UUID
-        final UUID CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
-
-        // 建立服務
-        BluetoothGattService healthThermometerService = new BluetoothGattService(HEALTH_THERMOMETER_SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY);
-
-        // 1. 溫度測量特徵 (Temperature Measurement Characteristic)
-        BluetoothGattCharacteristic temperatureMeasurementCharacteristic = new BluetoothGattCharacteristic(
-                TEMPERATURE_MEASUREMENT_UUID,
-                BluetoothGattCharacteristic.PROPERTY_INDICATE, // 注意：這是 Indicate (需要確認)
-                0 // 無權限
-        );
-        // 加入 CCCD
-        temperatureMeasurementCharacteristic.addDescriptor(new BluetoothGattDescriptor(CCCD_UUID, BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE));
-
-        // 設定初始溫度值 (37.0f)
-        float initialTemp = 37.0f;
-        int bits = Float.floatToIntBits(initialTemp);
-        temperatureMeasurementCharacteristic.setValue(new byte[5]); // Flags + float
-        temperatureMeasurementCharacteristic.setValue(bits, BluetoothGattCharacteristic.FORMAT_FLOAT, 1);
-        healthThermometerService.addCharacteristic(temperatureMeasurementCharacteristic);
-
-        // --- 新增開始 ---
-        // 2. 測量間隔特徵 (Measurement Interval Characteristic)
-        // 根據SIG標準，這個特徵是可選的，屬性為可讀(Read)，可選可寫(Optional Write)。
-        // 它的值是一個 uint16，單位是秒。
-        BluetoothGattCharacteristic measurementIntervalCharacteristic = new BluetoothGattCharacteristic(
-                MEASUREMENT_INTERVAL_UUID,
-                BluetoothGattCharacteristic.PROPERTY_READ | BluetoothGattCharacteristic.PROPERTY_WRITE, // 設為可讀可寫
-                BluetoothGattCharacteristic.PERMISSION_READ | BluetoothGattCharacteristic.PERMISSION_WRITE
-        );
-
-        // 設定一個初始的測量間隔，例如 5 秒
-        int interval = 5; // 5 seconds
-        measurementIntervalCharacteristic.setValue(new byte[2]);
-        measurementIntervalCharacteristic.setValue(interval, BluetoothGattCharacteristic.FORMAT_UINT16, 0);
-
-        // 根據HealthThermometerServiceFragment.java，它還有一個 "Valid Range" 描述符
-        // 這個描述符 (UUID: 0x2906) 用來告訴客戶端可接受的寫入範圍。
-        final UUID VALID_RANGE_DESCRIPTOR_UUID = UUID.fromString("00002906-0000-1000-8000-00805f9b34fb");
-        BluetoothGattDescriptor validRangeDescriptor = new BluetoothGattDescriptor(
-                VALID_RANGE_DESCRIPTOR_UUID,
-                BluetoothGattDescriptor.PERMISSION_READ // 該描述符為唯讀
-        );
-        // 設定有效範圍，例如 1 到 60 秒
-        int lowerBound = 1;
-        int upperBound = 60;
-        byte[] range = new byte[4]; // 2 bytes for lower, 2 bytes for upper
-        range[0] = (byte) (lowerBound & 0xFF);
-        range[1] = (byte) ((lowerBound >> 8) & 0xFF);
-        range[2] = (byte) (upperBound & 0xFF);
-        range[3] = (byte) ((upperBound >> 8) & 0xFF);
-        validRangeDescriptor.setValue(range);
-        measurementIntervalCharacteristic.addDescriptor(validRangeDescriptor);
-
-        healthThermometerService.addCharacteristic(measurementIntervalCharacteristic);
-
-        return healthThermometerService;
-    }
-
-    private BluetoothGattService createDeviceInfoService() {
-        final UUID DEVICE_INFO_SERVICE_UUID = UUID.fromString("0000180A-0000-1000-8000-00805f9b34fb");
-        final BluetoothGattService deviceInfoService = new BluetoothGattService(DEVICE_INFO_SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY);
-
-        // --- 特徵: Manufacturer Name String (UUID: 0x2A29) ---
-        final UUID MANUFACTURER_NAME_UUID = UUID.fromString("00002A29-0000-1000-8000-00805f9b34fb");
-        final BluetoothGattCharacteristic manufacturerNameChar = new BluetoothGattCharacteristic(
-                MANUFACTURER_NAME_UUID,
-                BluetoothGattCharacteristic.PROPERTY_READ,
-                BluetoothGattCharacteristic.PERMISSION_READ
-        );
-        manufacturerNameChar.setValue("MyAndroidDevice");
-        deviceInfoService.addCharacteristic(manufacturerNameChar);
-
-        // --- 特徵: Model Number String (UUID: 0x2A24) ---
-        final UUID MODEL_NUMBER_UUID = UUID.fromString("00002A24-0000-1000-8000-00805f9b34fb");
-        final BluetoothGattCharacteristic modelNumberChar = new BluetoothGattCharacteristic(
-                MODEL_NUMBER_UUID,
-                BluetoothGattCharacteristic.PROPERTY_READ,
-                BluetoothGattCharacteristic.PERMISSION_READ
-        );
-        modelNumberChar.setValue(Build.MODEL);
-        deviceInfoService.addCharacteristic(modelNumberChar);
-
-        // --- 特徵: Serial Number String (UUID: 0x2A25) ---
-        final UUID SERIAL_NUMBER_UUID = UUID.fromString("00002A25-0000-1000-8000-00805f9b34fb");
-        final BluetoothGattCharacteristic serialNumberChar = new BluetoothGattCharacteristic(
-                SERIAL_NUMBER_UUID,
-                BluetoothGattCharacteristic.PROPERTY_READ,
-                BluetoothGattCharacteristic.PERMISSION_READ
-        );
-        serialNumberChar.setValue("1234-ABCD");
-        deviceInfoService.addCharacteristic(serialNumberChar);
-
-        return deviceInfoService;
-    }
-
-    /**
-     * 依據 SIG 標準建立當前時間服務 (Current Time Service)
-     * Service UUID: 0x1805
-     */
-    private BluetoothGattService createCurrentTimeService() {
-        final UUID CURRENT_TIME_SERVICE_UUID = UUID.fromString("00001805-0000-1000-8000-00805f9b34fb");
-        final BluetoothGattService currentTimeService = new BluetoothGattService(CURRENT_TIME_SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY);
-
-        // --- 特徵: Current Time (UUID: 0x2A2B) ---
-        final UUID CURRENT_TIME_UUID = UUID.fromString("00002A2B-0000-1000-8000-00805f9b34fb");
-        final BluetoothGattCharacteristic currentTimeChar = new BluetoothGattCharacteristic(
-                CURRENT_TIME_UUID,
-                BluetoothGattCharacteristic.PROPERTY_READ | BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-                BluetoothGattCharacteristic.PERMISSION_READ
-        );
-
-        final UUID CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
-        final BluetoothGattDescriptor cccDescriptor = new BluetoothGattDescriptor(
-                CCCD_UUID,
-                BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE
-        );
-        cccDescriptor.setValue(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE);
-        currentTimeChar.addDescriptor(cccDescriptor);
-
-        // 動態獲取當前時間並設定
-        Calendar calendar = Calendar.getInstance();
-        int year = calendar.get(Calendar.YEAR);
-        int month = calendar.get(Calendar.MONTH) + 1; // Month is 0-based
-        int day = calendar.get(Calendar.DAY_OF_MONTH);
-        int hour = calendar.get(Calendar.HOUR_OF_DAY);
-        int minute = calendar.get(Calendar.MINUTE);
-        int second = calendar.get(Calendar.SECOND);
-        int dayOfWeek = calendar.get(Calendar.DAY_OF_WEEK); // Sunday=1, ..., Saturday=7
-        if (dayOfWeek == Calendar.SUNDAY) { dayOfWeek = 7; } else { dayOfWeek -= 1; } // SIG: Monday=1..Sunday=7
-
-        byte[] timeValue = new byte[10];
-        timeValue[0] = (byte) (year & 0xFF);
-        timeValue[1] = (byte) ((year >> 8) & 0xFF);
-        timeValue[2] = (byte) month;
-        timeValue[3] = (byte) day;
-        timeValue[4] = (byte) hour;
-        timeValue[5] = (byte) minute;
-        timeValue[6] = (byte) second;
-        timeValue[7] = (byte) dayOfWeek;
-        timeValue[8] = 0; // Fractions256
-        timeValue[9] = 1; // Adjust Reason (Manual update)
-        currentTimeChar.setValue(timeValue);
-
-        currentTimeService.addCharacteristic(currentTimeChar);
-
-        return currentTimeService;
-    }
-
-
     private void updateUiForIdleState() {
         binding.text.setText("閒置中");
         binding.discoverBtn.setText("開始掃描");
