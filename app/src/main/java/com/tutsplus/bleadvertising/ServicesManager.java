@@ -95,38 +95,20 @@ public class ServicesManager {
      * 開始模擬數據變化
      */
     public void startSimulation() {
-        if (isSimulating) {
-            Log.d(TAG, "模擬已經在運行中。");
+        if (isSimulating) {            Log.d(TAG, "模擬已經在運行中。");
             return;
         }
         isSimulating = true;
 
         // 模擬電池電量變化
         batterySimulatorThread = new Thread(() -> {
-            int batteryLevel = 80;
-            boolean increasing = true;
             while (isSimulating) {
-//                if (increasing) {
-//                    batteryLevel++;
-//                    if (batteryLevel >= 100) increasing = false;
-//                } else {
-//                    batteryLevel--;
-//                    if (batteryLevel <= 20) increasing = true;
-//                }
-//                batteryLevelCharacteristic.setValue(new byte[]{(byte) batteryLevel});
-//                notifyCharacteristicChanged(batteryLevelCharacteristic, false); // Notification
-//                try {
-//                    Thread.sleep(10000); // 每 5 秒更新一次
-//                } catch (InterruptedException e) {
-//                    Thread.currentThread().interrupt();
-//                }
-                 batteryLevel = 20 + random.nextInt(80);
-
-                batteryLevelCharacteristic.setValue(new byte[]{(byte) batteryLevel});
-                notifyCharacteristicChanged(batteryLevelCharacteristic, false); // Notification
+                int batteryLevel = 20 + random.nextInt(80);
+                byte[] value = GattValueBuilder.forBatteryLevel(batteryLevel);
+                batteryLevelCharacteristic.setValue(value);
+                notifyCharacteristicChanged(batteryLevelCharacteristic, false);
 
                 try {
-                    // 更新間隔維持不變，例如每 10 秒更新一次
                     Thread.sleep(30000);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -138,10 +120,12 @@ public class ServicesManager {
         // 模擬心率變化
         heartRateSimulatorThread = new Thread(() -> {
             while (isSimulating) {
-                int heartRate = 60 + random.nextInt(15); // 60-74 bpm
-                // Flags: UINT8, Sensor Not Connected, Energy Expended Present
-                heartRateMeasurementCharacteristic.setValue(new byte[]{0b00001000, (byte) heartRate, 0, 0});
-                notifyCharacteristicChanged(heartRateMeasurementCharacteristic, false); // Notification
+                int heartRate = 60 + random.nextInt(15);
+                byte[] value = GattValueBuilder.forHeartRateMeasurement(heartRate);
+                heartRateMeasurementCharacteristic.setValue(value);
+
+                notifyCharacteristicChanged(heartRateMeasurementCharacteristic, false);
+
                 try {
                     Thread.sleep(29000);
                 } catch (InterruptedException e) {
@@ -154,13 +138,13 @@ public class ServicesManager {
         // 模擬溫度變化
         temperatureSimulatorThread = new Thread(() -> {
             while (isSimulating) {
-                float temperature = 36.5f + random.nextFloat(); // 36.5 - 37.5
-                int bits = Float.floatToIntBits(temperature);
-                temperatureMeasurementCharacteristic.setValue(new byte[5]);
-                temperatureMeasurementCharacteristic.setValue(bits, BluetoothGattCharacteristic.FORMAT_FLOAT, 1);
-                notifyCharacteristicChanged(temperatureMeasurementCharacteristic, true); // Indication
+                float temperature = 36.5f + random.nextFloat();
+                byte[] value = GattValueBuilder.forTemperatureMeasurement(temperature);
+                temperatureMeasurementCharacteristic.setValue(value);
+                notifyCharacteristicChanged(temperatureMeasurementCharacteristic, true);
+
                 try {
-                    Thread.sleep(60000); // 每 10 秒更新一次
+                    Thread.sleep(60000);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
