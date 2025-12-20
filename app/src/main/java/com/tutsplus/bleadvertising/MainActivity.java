@@ -2,8 +2,6 @@ package com.tutsplus.bleadvertising;
 
 import android.Manifest;
 import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothGattCharacteristic;
-import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattServer;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
@@ -22,7 +20,6 @@ import android.os.Bundle;
 import android.os.ParcelUuid;
 import android.text.TextUtils;
 import android.util.Log;
-import android.util.SparseArray;
 import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
@@ -32,6 +29,10 @@ import androidx.annotation.Nullable;
 import androidx.annotation.RequiresPermission;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.lifecycle.Observer;
 import androidx.lifecycle.ViewModelProvider;
 
@@ -39,19 +40,15 @@ import com.tutsplus.bleadvertising.databinding.ActivityMainBinding;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
-
     private ActivityMainBinding binding;
     private BleViewModel bleViewModel;
-    private BluetoothManager bluetoothManager; // 負責管理藍牙
+    private BluetoothManager bluetoothManager;
     private BluetoothAdapter bluetoothAdapter;
     private BluetoothLeScanner bleScanner;
     private BluetoothLeAdvertiser bleAdvertiser;
@@ -62,8 +59,15 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
+        ViewCompat.setOnApplyWindowInsetsListener(binding.getRoot(), (v, windowInsets) -> {
+            Insets insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(insets.left, insets.top, insets.right, insets.bottom);
+            return windowInsets;
+        });
+
         bleViewModel = new ViewModelProvider(this).get(BleViewModel.class);
         if (!initBluetooth()) {
             disableAllButtons();
@@ -397,6 +401,7 @@ public class MainActivity extends AppCompatActivity {
         }
         bleAdvertiser = null;
     }
+
     private void updateUiForIdleState() {
         binding.text.setText("閒置中");
         binding.discoverBtn.setText("開始掃描");
