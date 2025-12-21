@@ -1,7 +1,5 @@
 package com.tutsplus.bleadvertising;
 
-import android.bluetooth.BluetoothGattCharacteristic;
-
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Calendar;
@@ -27,6 +25,222 @@ public final class GattValueBuilder {
                 .put((byte) batteryLevel)
                 .array();
     }
+
+    /**
+     * 封裝血壓測量 (0x2A35) 的值。
+     * 血壓單位為 mmHg，脈率單位為 bpm。
+     *
+     * @param systolic 收縮壓 (SFLOAT)。
+     * @param diastolic 舒張壓 (SFLOAT)。
+     * @param meanArterialPressure 平均動脈壓 (SFLOAT)。
+     * @param pulseRate 脈率 (SFLOAT)。
+     * @param hasPulseRate 如果包含脈率數據，設為 true。
+     * @return 符合格式的 byte[]。
+     */
+    public static byte[] forBloodPressureMeasurement(float systolic, float diastolic, float meanArterialPressure, float pulseRate, boolean hasPulseRate) {
+        // Flags: 單位為 mmHg, 不含時間戳, 含脈率
+        byte flags = (byte) (hasPulseRate ? 0b0000_0010 : 0b0000_0000);
+        int bufferSize = 1 + 6; // Flags + 3x SFLOAT
+
+        if (hasPulseRate) {
+            bufferSize += 2; // Pulse Rate (SFLOAT)
+        }
+
+        ByteBuffer buffer = ByteBuffer.allocate(bufferSize).order(ByteOrder.LITTLE_ENDIAN);
+
+        // 1. Flags
+        buffer.put(flags);
+
+        // 2. 血壓測量值 (收縮壓, 舒張壓, 平均動脈壓) - SFLOAT
+        // SFLOAT 是一種 16-bit 浮點數，由 4-bit 指數和 12-bit 尾數組成
+        // 這裡為了簡化，我們直接使用 IEEE-754 32-bit float，但客戶端需要知道如何解析
+        // 為了更符合規範，應將 float 轉為 SFLOAT，但這需要額外的轉換邏輯
+        // 此處我們將其直接當作 Float 處理，並佔用相應字節空間
+        // SFLOAT 的字節長度是 2 bytes (16-bit)
+        // SFLOAT 是一種16位元的浮點數。這裡為了簡化，我們直接將 float 轉為 short。
+        // 在真實設備上，需要嚴格按照 SFLOAT (12位尾數 + 4位指數) 格式轉換。
+
+        buffer.putShort((short) systolic);
+        buffer.putShort((short) diastolic);
+        buffer.putShort((short) meanArterialPressure);
+
+        // 3. 脈率 (可選)
+        if (hasPulseRate) {
+            buffer.putShort((short) pulseRate);
+        }
+
+        return buffer.array();
+    }
+
+
+    /**
+     * 封裝 Device Time (0x2B90) 的值。
+     * 結構與 Current Time 相似，但不包含 Adjust Reason。
+     * @param calendar 一個 Calendar 物件，代表要設定的時間。
+     * @return 符合格式的 byte[]。
+     */
+    public static byte[] forDeviceTime(Calendar calendar) {
+        int year = calendar.get(Calendar.YEAR);
+        int month = calendar.get(Calendar.MONTH) + 1; // Month is 0-based
+        int day = calendar.get(Calendar.DAY_OF_MONTH);
+        int hour = calendar.get(Calendar.HOUR_OF_DAY);
+        int minute = calendar.get(Calendar.MINUTE);
+        int second = calendar.get(Calendar.SECOND);
+        int dayOfWeek = calendar.get(Calendar.DAY_OF_WEEK); // Sunday=1, ..., Saturday=7
+        // SIG 標準: Monday=1..Sunday=7
+        if (dayOfWeek == Calendar.SUNDAY) {
+            dayOfWeek = 7;
+        } else {
+            dayOfWeek -= 1;
+        }
+
+        // 使用 ByteBuffer 確保位元組順序正確 (LITTLE_ENDIAN)
+        // 總共 9 bytes: Year(2) + Month(1) + Day(1) + Hour(1) + Minute(1) + Second(1) + DayOfWeek(1) + Fractions256(1)
+        ByteBuffer buffer = ByteBuffer.allocate(9).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.putShort((short) year);
+        buffer.put((byte) month);
+        buffer.put((byte) day);
+        buffer.put((byte) hour);
+        buffer.put((byte) minute);
+        buffer.put((byte) second);
+        buffer.put((byte) dayOfWeek);
+        buffer.put((byte) 0); // Fractions256
+
+        return buffer.array();
+    }
+
+    /**
+     * 封裝血糖測量 (0x2A18) 的值。
+     * @param sequenceNumber 序列號，每個測量值遞增。
+     * @param glucoseConcentration 血糖濃度，單位 mg/dL。
+     * @param includeTimeOffset 是否包含時間偏移。
+     * @param includeTypeAndLocation 是否包含測量類型和位置。
+     * @return 符合格式的 byte[]。
+     */
+    public static byte[] forGlucoseMeasurement(int sequenceNumber, float glucoseConcentration, boolean includeTimeOffset, boolean includeTypeAndLocation) {
+        // --- Flags (1 byte) ---
+        // bit 0: Time Offset Present (1 = true)
+        // bit 1: Glucose Concentration, Type, and Sample Location Present (1 = true)
+        // bit 2: Glucose Concentration Units (0 = kg/L, 1 = mol/L) - 我們使用 mg/dL，所以這個位元在此無效，但會被包含。
+        // bit 3: Sensor Status Annunciation Present (1 = true)
+        byte flags = 0;
+        if (includeTimeOffset) {
+            flags |= 0b0000_0001;
+        }
+        if (includeTypeAndLocation) {
+            flags |= 0b0000_0010;
+        }
+        // 為了簡化，我們不包含 Sensor Status (bit 3)
+        // 濃度單位將使用 SFLOAT 表示 mg/dL，而不是 mol/L。
+
+        // --- 計算緩衝區大小 ---
+        // Flags(1) + SeqNum(2) + BaseTime(7) + Conc(2) = 12 bytes (基本)
+        int bufferSize = 1 + 2 + 7; // Flags, Sequence Number, Base Time
+        if (includeTimeOffset) {
+            bufferSize += 2; // Time Offset (SINT16)
+        }
+        if (includeTypeAndLocation) {
+            bufferSize += 3; // Concentration (SFLOAT) + Type/Location(1)
+        } else {
+            bufferSize += 2; // Concentration (SFLOAT)
+        }
+
+        ByteBuffer buffer = ByteBuffer.allocate(bufferSize).order(ByteOrder.LITTLE_ENDIAN);
+
+        // 1. Flags
+        buffer.put(flags);
+
+        // 2. Sequence Number (UINT16)
+        buffer.putShort((short) sequenceNumber);
+
+        // 3. Base Time (DateTime) - 7 bytes
+        Calendar now = Calendar.getInstance();
+        buffer.putShort((short) now.get(Calendar.YEAR));
+        buffer.put((byte) (now.get(Calendar.MONTH) + 1));
+        buffer.put((byte) now.get(Calendar.DAY_OF_MONTH));
+        buffer.put((byte) now.get(Calendar.HOUR_OF_DAY));
+        buffer.put((byte) now.get(Calendar.MINUTE));
+        buffer.put((byte) now.get(Calendar.SECOND));
+
+        // 4. Time Offset (SINT16) - 可選
+        if (includeTimeOffset) {
+            buffer.putShort((short) 0); // 假設沒有時間偏移
+        }
+
+        // 5. Glucose Concentration (SFLOAT, mg/dL)
+        // SFLOAT 是一種16位元的浮點數。這裡為了簡化，我們直接將 float 轉為 short。
+        buffer.putShort((short) glucoseConcentration);
+
+        // 6. Type and Sample Location (Nibble-Nibble) - 可選
+        if (includeTypeAndLocation) {
+            // Type: 1 (毛細管全血), Location: 1 (指尖) -> 0x11
+            byte typeAndLocation = 0x11;
+            buffer.put(typeAndLocation);
+        }
+
+        return buffer.array();
+    }
+
+    /**
+     * 封裝助聽器當前預設索引 (Active Preset Index, 0x2FDC) 的值。
+     * •Hearing Aid Features (助聽器功能): 0x2FD9 - 唯讀 (Read)，描述助聽器支援的功能，例如它是單耳還是雙耳、是否支援音量控制等。
+     * •Preset Control Point (預設控制點): 0x2FDB - 可寫/可通知 (Write/Notify)，用於控制和切換助聽器的預設模式 (如 "正常"、"餐廳"、"戶外" 模式)。
+     * •Active Preset Index (當前預設索引): 0x2FDC - 唯讀/可通知 (Read/Notify)，回報當前正在使用的預設模式是哪一個。
+     * @param presetIndex 當前的預設模式索引。
+     * @return 符合格式的 byte[]。
+     */
+    public static byte[] forActivePresetIndex(int presetIndex) {
+        // Active Preset Index 是一個 UINT8 值。
+        return new byte[]{(byte) presetIndex};
+    }
+
+
+    /**
+     * Fitness Machine Feature (健身器材功能): 0x2ACC - 唯讀 (Read)，
+     * 這非常重要，它告訴客戶端 (如 Zwift App) 這台設備支援哪些功能（例如，速度、踏頻、功率、心率、阻力控制等）。
+     * •Treadmill Data (跑步機數據) /
+     * Cross Trainer Data (橢圓機數據) /
+     * Indoor Bike Data (室內自行車數據) 等: 0x2ACD / 0x2ACE / 0x2AD2 - 可通知 (Notify)，用於發送即時運動數據。
+     * 我們將重點實作 Indoor Bike Data (0x2AD2)，因為這是智慧騎行台最核心的特徵。•Fitness Machine Control Point (健身器材控制點): 0x2AD9 - 可寫/可指示 (Write/Indicate)，這是客戶端向健身設備發送命令的入口，例如請求開始、停止、重置，以及最重要的設定目標阻力/功率。
+     * •Fitness Machine Status (健身器材狀態): 0x2ADA - 可通知 (Notify)，用於回報設備的當前狀態（例如，已準備好、正在運行等）
+     * 封裝室內自行車數據 (Indoor Bike Data, 0x2AD2) 的值。
+     * @param speed 瞬時速度 (UINT16, 單位 km/h, 解析度 0.01)。
+     * @param cadence 瞬時踏頻 (UINT16, 單位 rpm, 解析度 0.5)。
+     * @param power 瞬時功率 (SINT16, 單位 watts)。
+     * @return 符合格式的 byte[]。
+     */
+    public static byte[] forIndoorBikeData(float speed, float cadence, int power) {
+        // --- Flags (2 bytes, LITTLE_ENDIAN) ---
+        // bit 1: Instantaneous Speed present
+        // bit 2: Instantaneous Cadence present
+        // bit 4: Instantaneous Power present
+        // 為了模擬常見的智慧訓練台，我們包含速度、踏頻和功率。
+        // 其他欄位（如平均值、總距離等）暫不包含以簡化。
+        short flags = 0b0000_0000_0001_0110; // 0x0016
+
+        // --- 計算緩衝區大小 ---
+        // Flags(2) + Speed(2) + Cadence(2) + Power(2)
+        int bufferSize = 2 + 2 + 2 + 2;
+
+        ByteBuffer buffer = ByteBuffer.allocate(bufferSize).order(ByteOrder.LITTLE_ENDIAN);
+
+        // 1. Flags
+        buffer.putShort(flags);
+
+        // 2. Instantaneous Speed (UINT16, km/h, resolution 0.01)
+        // 將傳入的 float 速度值乘以 100
+        buffer.putShort((short) (speed * 100));
+
+        // 3. Instantaneous Cadence (UINT16, rpm, resolution 0.5)
+        // 將傳入的 float 踏頻值乘以 2
+        buffer.putShort((short) (cadence * 2));
+
+        // 4. Instantaneous Power (SINT16, watts)
+        buffer.putShort((short) power);
+
+        return buffer.array();
+    }
+
 
     /**
      * 封裝心率測量 (0x2A37) 的值。
@@ -117,6 +331,136 @@ public final class GattValueBuilder {
         buffer.put((byte) dayOfWeek);
         buffer.put((byte) 0); // Fractions256
         buffer.put((byte) 1); // Adjust Reason (Manual update)
+
+        return buffer.array();
+    }
+
+    /**
+     * 封裝 ESS 的溫度 (Temperature, 0x2A6E) 的值。
+     *  ESS 是一個容器服務，可以包含多種環境測量特徵。常見的有： 市面上常見的環境感測設備（如 BME280 感測器）
+     *  •Temperature (0x2A6E): 溫度，這是 ESS 的標準溫度特徵，不同於健康溫度計服務 (0x1809) 中的溫度 (0x2A1C)。
+     *  •Humidity (0x2A6F): 濕度。
+     *  •Pressure (0x2A6D): 氣壓。
+     *  •Wind Chill (0x2A79): 風寒，您提供的檔案中有此定義。
+     *  •UV Index (0x2A76): 紫外線指數。
+     *  •屬性: 這些特徵通常是唯讀 (Read) 和/或可通知 (Notify) 的。
+     * @param temperature 溫度，單位為攝氏度。
+     * @return 符合格式的 byte[]。
+     */
+    public static byte[] forTemperature(float temperature) {
+        // 根據 SIG 標準，此特徵為 int16，單位為攝氏度，解析度為 0.01。
+        // 所以需要將傳入的 float 值乘以 100。
+        short tempValue = (short) (temperature * 100);
+        ByteBuffer buffer = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.putShort(tempValue);
+        return buffer.array();
+    }
+
+    /**
+     * 封裝 ESS 的濕度 (Humidity, 0x2A6F) 的值。
+     * @param humidity 相對濕度，單位為 %。
+     * @return 符合格式的 byte[]。
+     */
+    public static byte[] forHumidity(float humidity) {
+        // 根據 SIG 標準，此特徵為 uint16，單位為百分比，解析度為 0.01。
+        // 所以需要將傳入的 float 值乘以 100。
+        int humidityValue = (int) (humidity * 100);
+        ByteBuffer buffer = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.putShort((short) humidityValue);
+        return buffer.array();
+    }
+
+    /**
+     * 封裝 ESS 的氣壓 (Pressure, 0x2A6D) 的值。
+     * @param pressure 氣壓，單位為百帕 (hPa)。
+     * @return 符合格式的 byte[]。
+     */
+    public static byte[] forPressure(float pressure) {
+        // 根據 SIG 標準，此特徵為 uint32，單位為帕斯卡(Pa)，解析度為 0.1。
+        // 傳入值為 hPa (百帕)，所以需要先轉為 Pa (乘以100)，再乘以10得到 uint32 的值。
+        int pressureValue = (int) (pressure * 100 * 10);
+        ByteBuffer buffer = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.putInt(pressureValue);
+        return buffer.array();
+    }
+
+    /**
+     * 封裝 ESS 的風寒 (Wind Chill, 0x2A79) 的值。
+     * @param temperature 體感溫度，單位為攝氏度。
+     * @return 符合格式的 byte[]。
+     */
+    public static byte[] forWindChill(int temperature) {
+        // 根據 SIG 標準，此特徵為 sint8，單位為攝氏度。
+        return new byte[]{(byte) temperature};
+    }
+
+
+    /**
+     * 封裝血氧飽和度單次測量 (PLX Spot-Check, 0x2A5E) 的值。
+     * •PLX Spot-Check Measurement (血氧飽和度單次測量): 0x2A5E - 用於發送單次的測量數據，包括 SpO₂ (血氧飽和度百分比) 和脈率。這通常是一個 Notify (通知) 特徵。
+     * •PLX Continuous Measurement (血氧飽和度連續測量): 0x2A5F - 用於連續發送測量數據。這也是一個 Notify 特徵。
+     * •PLX Features (血氧飽和度功能): 0x2A60 - 唯讀 (Read)，描述設備支援的功能 (例如是否支援脈率、測量狀態等)。
+     * @param spo2 血氧飽和度 (SFLOAT, 單位 %)。
+     * @param pulseRate 脈率 (SFLOAT, 單位 bpm)。
+     * @param includeTimestamp 是否包含時間戳。
+     * @return 符合格式的 byte[]。
+     */
+    public static byte[] forPulseOximeterSpotCheck(float spo2, float pulseRate, boolean includeTimestamp) {
+        // --- Flags (1 byte) ---
+        // bit 0: Timestamp present
+        // bit 1: Measurement Status present
+        // bit 2: Device and Sensor Status present
+        // bit 3: Pulse Amplitude Index present
+        // 為了簡化，我們只實作時間戳
+        byte flags = (byte) (includeTimestamp ? 0b0000_0001 : 0b0000_0000);
+
+        // --- 計算緩衝區大小 ---
+        int bufferSize = 1 + 4; // Flags(1) + SpO2(SFLOAT 2) + PulseRate(SFLOAT 2)
+        if (includeTimestamp) {
+            bufferSize += 7; // DateTime(7)
+        }
+
+        ByteBuffer buffer = ByteBuffer.allocate(bufferSize).order(ByteOrder.LITTLE_ENDIAN);
+
+        // 1. Flags
+        buffer.put(flags);
+
+        // 2. SpO2 (SFLOAT) 和 Pulse Rate (SFLOAT)
+        // SFLOAT 是一種16位元的浮點數。這裡為了簡化，我們直接將 float 轉為 short。
+        buffer.putShort((short) spo2);
+        buffer.putShort((short) pulseRate);
+
+        // 3. Timestamp (DateTime) - 可選
+        if (includeTimestamp) {
+            Calendar now = Calendar.getInstance();
+            buffer.putShort((short) now.get(Calendar.YEAR));
+            buffer.put((byte) (now.get(Calendar.MONTH) + 1));
+            buffer.put((byte) now.get(Calendar.DAY_OF_MONTH));
+            buffer.put((byte) now.get(Calendar.HOUR_OF_DAY));
+            buffer.put((byte) now.get(Calendar.MINUTE));
+            buffer.put((byte) now.get(Calendar.SECOND));
+        }
+
+        return buffer.array();
+    }
+
+
+    /**
+     * 封裝體重計量測 (0x2A9D) 的值。
+     * @param weight 體重，單位為公斤(kg)。
+     * @return 符合格式的 byte[]。
+     */
+    public static byte[] forWeightScaleMeasurement(float weight) {
+        // Flags: 0b00000000 表示單位為公斤(kg)，不包含時間戳、使用者索引和BMI/身高。
+        byte flags = 0b0000_0000;
+
+        // Weight 是 UINT16 型別，解析度為 0.005 kg。
+        // 所以需要將傳入的 float 值乘以 200 (1 / 0.005) 來得到 UINT16 的值。
+        int weightValue = (int) (weight * 200);
+
+        ByteBuffer buffer = ByteBuffer.allocate(3).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.put(flags);
+        buffer.putShort((short) weightValue);
 
         return buffer.array();
     }
