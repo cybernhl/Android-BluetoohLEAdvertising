@@ -20,9 +20,10 @@ import androidx.lifecycle.ViewModel;
 
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.Queue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-
 public class BleViewModel extends ViewModel {
 
     private static final String TAG = "BleViewModel";
@@ -38,7 +39,8 @@ public class BleViewModel extends ViewModel {
     // --- UI 顯示資料 LiveData ---
     private final MutableLiveData<String> _scanResultText = new MutableLiveData<>("");
     public final LiveData<String> scanResultText = _scanResultText;
-
+    private final Queue<BluetoothGattService> serviceQueue = new LinkedList<>();
+    private boolean isAddingService = false; // 狀態旗標，防止重複觸發
     private final MutableLiveData<String> _toastMessage = new MutableLiveData<>();
     public final LiveData<String> toastMessage = _toastMessage;
 
@@ -56,22 +58,43 @@ public class BleViewModel extends ViewModel {
         this.connectedDevices.clear(); // 確保開始時是乾淨的狀態
         ServicesManager.getInstance().setGattServer(this.gattServer, this.connectedDevices);
         ServicesManager.getInstance().startSimulation(); // 開始模擬數據
-
+        // 觸發服務添加流程
+        processServiceQueue();
         Log.i(TAG, "GATT Server 已經成功注入到 ViewModel 並設定到 ServicesManager。");
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     public void addGattService(BluetoothGattService service) {
-        if (this.gattServer == null) {
-            Log.e(TAG, "GattServer must be set before adding a service.");
-            postToastMessage("錯誤：GattServer 尚未初始化");
-            return;
+        // 將服務加入佇列，而不是立即添加
+        serviceQueue.add(service);
+        Log.d(TAG, "服務已加入佇列: " + service.getUuid() + ", 目前佇列大小: " + serviceQueue.size());
+
+        // 如果GattServer已經準備好且沒有正在添加的服務，則開始處理
+        if (gattServer != null && !isAddingService) {
+            processServiceQueue();
         }
-        try {
-            this.gattServer.addService(service);
-            Log.i(TAG, "成功加入服務: " + service.getUuid());
-        } catch (SecurityException e) {
-            Log.e(TAG, "加入服務失敗，缺少權限: " + service.getUuid(), e);
+    }
+
+    // --- 新增：處理服務佇列的方法 ---
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    private void processServiceQueue() {
+        if (isAddingService) return; // 如果正在添加，則等待回呼
+        if (serviceQueue.isEmpty()) {
+            Log.i(TAG, "所有服務都已成功加入。");
+            return; // 所有服務都已添加完畢
+        }
+
+        // 從佇列中取出下一個服務並開始添加
+        BluetoothGattService service = serviceQueue.poll();
+        if (service != null && gattServer != null) {
+            isAddingService = true; // 設定旗標
+            try {
+                gattServer.addService(service);
+                Log.i(TAG, "正在嘗試加入服務: " + service.getUuid());
+            } catch (SecurityException e) {
+                Log.e(TAG, "加入服務失敗，缺少權限: " + service.getUuid(), e);
+                isAddingService = false; // 發生錯誤，重置旗標
+            }
         }
     }
 
@@ -85,6 +108,20 @@ public class BleViewModel extends ViewModel {
 
     // 將 Callback 實作放在 ViewModel 中，這是處理邏輯的地方
     private final BluetoothGattServerCallback gattServerCallback = new BluetoothGattServerCallback() {
+        @Override
+        public void onServiceAdded(int status, BluetoothGattService service) {
+            Log.d(TAG, "服務已加入完成: " + service.getUuid() + ", 狀態: " + (status == BluetoothGatt.GATT_SUCCESS ? "SUCCESS" : "FAILURE"));
+            // 重置旗標，表示當前服務添加流程已結束
+            isAddingService = false;
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                // 觸發下一個服務的添加
+                processServiceQueue();
+            } else {
+                Log.e(TAG, "無法加入服務: " + service.getUuid());
+                // 這裡可以選擇清空佇列或進行其他錯誤處理
+                serviceQueue.clear();
+            }
+        }
         @Override
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         public void onConnectionStateChange(BluetoothDevice device, int status, int newState) {
