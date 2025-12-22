@@ -22,6 +22,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Queue;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 public class BleViewModel extends ViewModel {
@@ -120,6 +121,26 @@ public class BleViewModel extends ViewModel {
                 Log.e(TAG, "無法加入服務: " + service.getUuid());
                 // 這裡可以選擇清空佇列或進行其他錯誤處理
                 serviceQueue.clear();
+            }
+        }
+
+        /**
+         * 新增或修改：處理特徵寫入請求，特別是針對 FTMS 控制點。
+         */
+        @Override
+        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+        public void onCharacteristicWriteRequest(BluetoothDevice device, int requestId, BluetoothGattCharacteristic characteristic, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+            Log.d(TAG, "收到特徵寫入請求: " + characteristic.getUuid() + ", 值: " + Arrays.toString(value));
+
+            final UUID FTMS_CONTROL_POINT_UUID =  UUID.fromString("00002AD9-0000-1000-8000-00805f9b34fb");
+
+            if (FTMS_CONTROL_POINT_UUID.equals(characteristic.getUuid())) {
+                // 將控制命令轉發給 ServicesManager 處理
+                ServicesManager.getInstance().handleFitnessMachineControlCommand(value);
+            }
+
+            if (responseNeeded) {
+                gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, value);
             }
         }
         @Override

@@ -93,6 +93,8 @@ public class ServicesManager {
     private volatile boolean isSimulating = false;
 
     private int glucoseSequence = 0; // 用於血糖測量的序列號
+    // --- 新增 FTMS 控制相關的成員變數 ---
+    private int targetResistanceLevel = 0; // 客戶端設定的目標阻力
     private final Random random = new Random();
 
     // --- 私有建構函式，確保單例 ---
@@ -365,19 +367,25 @@ public class ServicesManager {
         environmentalSensingSimulatorThread.start();
 
         fitnessMachineSimulatorThread = new Thread(() -> {
+            int totalDistance = 0;
             while (isSimulating) {
-                // 模擬騎行台數據
-                float speed = 25.0f + random.nextFloat() * 10; // 25-35 km/h
-                float cadence = 80.0f + random.nextFloat() * 20; // 80-100 rpm
-                int power = 150 + random.nextInt(100);      // 150-250 watts
+                // 模擬基礎數據
+                float speed = 25.0f + (random.nextFloat() * 10); // 25-35 km/h
+                float cadence = 85.0f + (random.nextFloat() * 10); // 85-95 rpm
+                int heartRate = 120 + random.nextInt(20); // 120-140 bpm
+                totalDistance += (int) (speed * 1000 / 3600); // 簡單累加距離 (m)
 
-                byte[] value = GattValueBuilder.forIndoorBikeData(speed, cadence, power);
+                // 根據目標阻力簡單計算功率
+                int basePower = 150;
+                int power = basePower + (targetResistanceLevel * 10) + random.nextInt(10);
+
+                // --- 使用擴充後的 Builder ---
+                byte[] value = GattValueBuilder.forIndoorBikeData(speed, cadence, power, heartRate, totalDistance);
                 indoorBikeDataCharacteristic.setValue(value);
-                notifyCharacteristicChanged(indoorBikeDataCharacteristic, false);
+                notifyCharacteristicChanged(indoorBikeDataCharacteristic, false); // Notify
 
                 try {
-                    // 健身器材數據更新頻率很高
-                    Thread.sleep(1000);
+                    Thread.sleep(1000); // FTMS 數據通常每秒更新一次
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
@@ -431,6 +439,27 @@ public class ServicesManager {
                     Log.e(TAG, "發送通知失敗，缺少權限", e);
                 }
             }
+        }
+    }
+
+    public void handleFitnessMachineControlCommand(byte[] command) {
+        if (command == null || command.length == 0) return;
+
+        ByteBuffer buffer = ByteBuffer.wrap(command).order(ByteOrder.LITTLE_ENDIAN);
+        byte opCode = buffer.get();
+
+        switch (opCode) {
+            case 0x04: // Set Target Resistance Level
+                if (buffer.remaining() >= 1) {
+                    targetResistanceLevel = buffer.get() & 0xFF; // 讀取 uint8
+                    Log.i(TAG, "FTMS: 客戶端設定目標阻力為: " + targetResistanceLevel);
+                    // 在這裡，你可以根據 targetResistanceLevel 來調整功率的模擬計算
+                }
+                break;
+            // 在這裡可以新增其他 OpCode 的處理, 如 0x05 (Set Target Power)
+            default:
+                Log.w(TAG, "FTMS: 收到未處理的控制命令 OpCode: " + opCode);
+                break;
         }
     }
 
@@ -1164,60 +1193,66 @@ public class ServicesManager {
         final UUID FTMS_UUID = UUID.fromString("00001826-0000-1000-8000-00805f9b34fb");
         final BluetoothGattService service = new BluetoothGattService(FTMS_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY);
 
-        final UUID FEATURE_UUID = UUID.fromString("00002ACC-0000-1000-8000-00805f9b34fb");
-        final UUID INDOOR_BIKE_DATA_UUID = UUID.fromString("00002AD2-0000-1000-8000-00805f9b34fb");
-        final UUID STATUS_UUID = UUID.fromString("00002ADA-0000-1000-8000-00805f9b34fb");
-        final UUID CONTROL_POINT_UUID = UUID.fromString("00002AD9-0000-1000-8000-00805f9b34fb");
         final UUID CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
-        // 1. Fitness Machine Feature (0x2ACC) - 唯讀 (Read)
+        // 1. **Fitness Machine Feature (0x2ACC) - 唯讀** (非常重要)
+        //    宣告此設備支援的功能。客戶端會首先讀取此特徵。
+        final UUID FTMS_FEATURE_UUID = UUID.fromString("00002ACC-0000-1000-8000-00805f9b34fb");
         BluetoothGattCharacteristic featureChar = new BluetoothGattCharacteristic(
-                FEATURE_UUID,
+                FTMS_FEATURE_UUID,
                 BluetoothGattCharacteristic.PROPERTY_READ,
                 BluetoothGattCharacteristic.PERMISSION_READ
         );
-        // 這是一個非常重要的點陣圖，告訴客戶端支援的功能
-        // Fitness Machine Features (Part 1):
-        // 假設支援踏頻(bit 1), 功率(bit 4), 阻力控制(bit 6), 功率控制(bit 7)
-        int part1 = 0b1101_0010;
-        // Target Setting Features (Part 2):
-        // 假設支援速度模擬(bit 0), 踏頻模擬(bit 1), 功率模擬(bit 2), 阻力模擬(bit 4)
-        int part2 = 0b0001_0111;
-        byte[] featureValue = new byte[]{
-                (byte) part1, 0, 0, 0, // Part 1
-                (byte) part2, 0, 0, 0  // Part 2
-        };
-        ByteBuffer featureBuffer = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN);
-        featureBuffer.putInt(part1).putInt(part2);
+        // Flags: 宣告支援踏頻、心率、功率、阻力控制和距離。
+        // 這是一個 32-bit 的 bit-mask。
+        int featureFlags = 0b0000_0000_0000_0110_0100_0000_0000_0110;
+        // bit 1: Cadence
+        // bit 2: Total Distance
+        // bit 8: Heart Rate
+        // bit 9: Resistance Control
+        // bit 13: Power Measurement
+        ByteBuffer featureBuffer = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
+        featureBuffer.putInt(featureFlags);
         featureChar.setValue(featureBuffer.array());
         service.addCharacteristic(featureChar);
 
-        // 2. Indoor Bike Data (0x2AD2) - 通知 (Notify)
-        BluetoothGattCharacteristic bikeDataChar = new BluetoothGattCharacteristic(
+
+        // 2. **Indoor Bike Data (0x2AD2) - 可通知**
+        //    (我們之前已經建立了它的引用 indoorBikeDataCharacteristic)
+        final UUID INDOOR_BIKE_DATA_UUID = UUID.fromString("00002AD2-0000-1000-8000-00805f9b34fb");
+        BluetoothGattCharacteristic indoorBikeDataChar = new BluetoothGattCharacteristic(
                 INDOOR_BIKE_DATA_UUID,
                 BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-                0 /* no permissions */);
-        bikeDataChar.addDescriptor(new BluetoothGattDescriptor(CCCD_UUID,
-                BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE));
-        service.addCharacteristic(bikeDataChar);
+                0
+        );
+        indoorBikeDataChar.addDescriptor(new BluetoothGattDescriptor(CCCD_UUID, BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE));
+        service.addCharacteristic(indoorBikeDataChar);
 
-        // 3. Fitness Machine Status (0x2ADA) - 通知 (Notify)
+        // 你也可以在這裡加入 Treadmill (0x2ACD) 和 Cross Trainer (0x2ACE) 的特徵，如果需要同時模擬的話。
+
+
+        // 3. **Fitness Machine Control Point (0x2AD9) - 可寫/可指示** (非常重要)
+        //    接收來自客戶端的命令。
+        final UUID FTMS_CONTROL_POINT_UUID = UUID.fromString("00002AD9-0000-1000-8000-00805f9b34fb");
+        BluetoothGattCharacteristic controlPointChar = new BluetoothGattCharacteristic(
+                FTMS_CONTROL_POINT_UUID,
+                BluetoothGattCharacteristic.PROPERTY_WRITE | BluetoothGattCharacteristic.PROPERTY_INDICATE,
+                BluetoothGattCharacteristic.PERMISSION_WRITE
+        );
+        controlPointChar.addDescriptor(new BluetoothGattDescriptor(CCCD_UUID, BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE));
+        service.addCharacteristic(controlPointChar);
+
+        // 4. **Fitness Machine Status (0x2ADA) - 可通知**
+        //    回報設備狀態。
+        final UUID FTMS_STATUS_UUID = UUID.fromString("00002ADA-0000-1000-8000-00805f9b34fb");
         BluetoothGattCharacteristic statusChar = new BluetoothGattCharacteristic(
-                STATUS_UUID,
+                FTMS_STATUS_UUID,
                 BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-                0 /* no permissions */);
-        statusChar.addDescriptor(new BluetoothGattDescriptor(CCCD_UUID,
-                BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE));
+                0
+        );
+        statusChar.addDescriptor(new BluetoothGattDescriptor(CCCD_UUID, BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE));
         service.addCharacteristic(statusChar);
 
-        // 4. Fitness Machine Control Point (0x2AD9) - 寫入/指示 (Write/Indicate)
-        BluetoothGattCharacteristic controlPointChar = new BluetoothGattCharacteristic(
-                CONTROL_POINT_UUID,
-                BluetoothGattCharacteristic.PROPERTY_WRITE | BluetoothGattCharacteristic.PROPERTY_INDICATE,
-                BluetoothGattCharacteristic.PERMISSION_WRITE);
-        controlPointChar.addDescriptor(new BluetoothGattDescriptor(CCCD_UUID,
-                BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE));
-        service.addCharacteristic(controlPointChar);
 
         return service;
     }

@@ -207,20 +207,22 @@ public final class GattValueBuilder {
      * @param speed 瞬時速度 (UINT16, 單位 km/h, 解析度 0.01)。
      * @param cadence 瞬時踏頻 (UINT16, 單位 rpm, 解析度 0.5)。
      * @param power 瞬時功率 (SINT16, 單位 watts)。
+     * @param heartRate 心率 (bpm)
+     * @param totalDistance 總距離 (meters)
      * @return 符合格式的 byte[]。
      */
-    public static byte[] forIndoorBikeData(float speed, float cadence, int power) {
+    public static byte[] forIndoorBikeData(float speed, float cadence, int power, int heartRate, int totalDistance) {
         // --- Flags (2 bytes, LITTLE_ENDIAN) ---
-        // bit 1: Instantaneous Speed present
-        // bit 2: Instantaneous Cadence present
-        // bit 4: Instantaneous Power present
-        // 為了模擬常見的智慧訓練台，我們包含速度、踏頻和功率。
-        // 其他欄位（如平均值、總距離等）暫不包含以簡化。
-        short flags = 0b0000_0000_0001_0110; // 0x0016
+        // bit 1: Instantaneous Speed
+        // bit 2: Instantaneous Cadence
+        // bit 4: Instantaneous Power
+        // bit 5: Heart Rate
+        // bit 8: Total Distance
+        short flags = 0b0000_0001_0011_0110; // 0x0136
 
         // --- 計算緩衝區大小 ---
-        // Flags(2) + Speed(2) + Cadence(2) + Power(2)
-        int bufferSize = 2 + 2 + 2 + 2;
+        // Flags(2) + Speed(2) + Cadence(2) + Power(2) + HeartRate(1) + TotalDistance(3)
+        int bufferSize = 2 + 2 + 2 + 2 + 1 + 3;
 
         ByteBuffer buffer = ByteBuffer.allocate(bufferSize).order(ByteOrder.LITTLE_ENDIAN);
 
@@ -228,15 +230,74 @@ public final class GattValueBuilder {
         buffer.putShort(flags);
 
         // 2. Instantaneous Speed (UINT16, km/h, resolution 0.01)
-        // 將傳入的 float 速度值乘以 100
         buffer.putShort((short) (speed * 100));
 
         // 3. Instantaneous Cadence (UINT16, rpm, resolution 0.5)
-        // 將傳入的 float 踏頻值乘以 2
         buffer.putShort((short) (cadence * 2));
 
         // 4. Instantaneous Power (SINT16, watts)
         buffer.putShort((short) power);
+
+        // 5. Heart Rate (UINT8, bpm)
+        buffer.put((byte) heartRate);
+
+        // 6. Total Distance (UINT24, meters)
+        // UINT24 需要用 3 個 bytes 來表示
+        buffer.put((byte) (totalDistance & 0xFF));
+        buffer.put((byte) ((totalDistance >> 8) & 0xFF));
+        buffer.put((byte) ((totalDistance >> 16) & 0xFF));
+
+        return buffer.array();
+    }
+
+    /**
+     * 封裝跑步機數據 (Treadmill Data, 0x2ACD) 的值。
+     * @param speed 瞬時速度 (km/h)
+     * @param incline 坡度 (%)
+     * @param totalDistance 總距離 (meters)
+     * @return 符合格式的 byte[]
+     */
+    public static byte[] forTreadmillData(float speed, float incline, int totalDistance) {
+        // Flags: bit 1 (Speed), bit 8 (Total Distance), bit 9 (Incline)
+        short flags = 0b0000_0011_0000_0010; // 0x0302
+
+        // Buffer size: Flags(2) + Speed(2) + Incline(2) + TotalDistance(3)
+        int bufferSize = 2 + 2 + 2 + 3;
+        ByteBuffer buffer = ByteBuffer.allocate(bufferSize).order(ByteOrder.LITTLE_ENDIAN);
+
+        buffer.putShort(flags);
+        buffer.putShort((short) (speed * 100)); // Speed
+        buffer.putShort((short) (incline * 10)); // Incline, resolution 0.1
+        // Total Distance (UINT24)
+        buffer.put((byte) (totalDistance & 0xFF));
+        buffer.put((byte) ((totalDistance >> 8) & 0xFF));
+        buffer.put((byte) ((totalDistance >> 16) & 0xFF));
+
+        return buffer.array();
+    }
+
+    /**
+     * 封裝橢圓機數據 (Cross Trainer Data, 0x2ACE) 的值。
+     * @param speed 瞬時速度 (km/h)
+     * @param power 瞬時功率 (watts)
+     * @param totalDistance 總距離 (meters)
+     * @return 符合格式的 byte[]
+     */
+    public static byte[] forCrossTrainerData(float speed, int power, int totalDistance) {
+        // Flags: bit 1 (Speed), bit 4 (Power), bit 8 (Total Distance)
+        short flags = 0b0000_0001_0001_0010; // 0x0112
+
+        // Buffer size: Flags(2) + Speed(2) + Power(2) + TotalDistance(3)
+        int bufferSize = 2 + 2 + 2 + 3;
+        ByteBuffer buffer = ByteBuffer.allocate(bufferSize).order(ByteOrder.LITTLE_ENDIAN);
+
+        buffer.putShort(flags);
+        buffer.putShort((short) (speed * 100)); // Speed
+        buffer.putShort((short) power); // Power
+        // Total Distance (UINT24)
+        buffer.put((byte) (totalDistance & 0xFF));
+        buffer.put((byte) ((totalDistance >> 8) & 0xFF));
+        buffer.put((byte) ((totalDistance >> 16) & 0xFF));
 
         return buffer.array();
     }
