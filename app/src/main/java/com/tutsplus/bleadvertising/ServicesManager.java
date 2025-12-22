@@ -25,6 +25,21 @@ import java.util.UUID;
  */
 public class ServicesManager {
     private static final String TAG = "ServicesManager";
+
+    // --- CF597 Health Scale C2 UUIDs ---
+    public static final UUID HEALTH_SCALE_C2_SERVICE_UUID = UUID.fromString("0000FFF0-0000-1000-8000-00805f9b34fb");
+    public static final UUID HEALTH_SCALE_C2_WRITE_UUID = UUID.fromString("0000FFF1-0000-1000-8000-00805f9b34fb");
+    public static final UUID HEALTH_SCALE_C2_RWN_UUID = UUID.fromString("0000FFF2-0000-1000-8000-00805f9b34fb");
+    public static final UUID HEALTH_SCALE_C2_NOTIFY_UUID = UUID.fromString("0000FFF4-0000-1000-8000-00805f9b34fb");
+
+    // --- Standard Service UUIDs ---
+    public static final UUID BATTERY_SERVICE_UUID = UUID.fromString("0000180F-0000-1000-8000-00805f9b34fb");
+    public static final UUID BATTERY_LEVEL_UUID = UUID.fromString("00002A19-0000-1000-8000-00805f9b34fb");
+    public static final UUID DEVICE_INFO_SERVICE_UUID = UUID.fromString("0000180A-0000-1000-8000-00805f9b34fb");
+    public static final UUID FIRMWARE_REVISION_STRING_UUID = UUID.fromString("00002A26-0000-1000-8000-00805f9b34fb");
+
+    // Standard CCCD
+    public static final UUID CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
     private static ServicesManager instance;
 
     // --- GATT Server 和連線裝置的引用 ---
@@ -90,6 +105,8 @@ public class ServicesManager {
     private Thread pulseOximeterSimulatorThread;
 
     private Thread weightScaleSimulatorThread;
+
+    private Thread cf597SimulatorThread;
     private volatile boolean isSimulating = false;
 
     private int glucoseSequence = 0; // 用於血糖測量的序列號
@@ -116,6 +133,7 @@ public class ServicesManager {
         this.pulseOximeterService = createPulseOximeterService(); // 新增
 
         this.weightScaleService = createWeightScaleService(); // 新增
+
         // 儲存需要動態更新的特徵的引用
         this.activePresetIndexCharacteristic = hearingAidService.getCharacteristic(UUID.fromString("00002FDC-0000-1000-8000-00805f9b34fb")); // 新增
 
@@ -162,6 +180,11 @@ public class ServicesManager {
         services.add(pulseOximeterService);
         services.add(weightScaleService); // 新增
         services.add(fitnessMachineService);
+
+        services.add(createHealthScaleC2Service());
+        services.add(createStandardBatteryService()); // 標準電池服務
+        services.add(createStandardDeviceInfoService()); // 標準設備資訊服務
+
         return services;
     }
 
@@ -392,7 +415,7 @@ public class ServicesManager {
             }
         });
         fitnessMachineSimulatorThread.start();
-
+        startCf597Simulation();
         Log.i(TAG, "數據模擬已開始。");
     }
 
@@ -410,7 +433,10 @@ public class ServicesManager {
         if (cyclingPowerSimulatorThread != null) cyclingPowerSimulatorThread.interrupt();
         if (environmentalSensingSimulatorThread != null) environmentalSensingSimulatorThread.interrupt(); // 新增
         if (fitnessMachineSimulatorThread != null) fitnessMachineSimulatorThread.interrupt(); // 新增
-
+        if (cf597SimulatorThread != null) {
+            cf597SimulatorThread.interrupt();
+            cf597SimulatorThread = null;
+        }
         Log.i(TAG, "數據模擬已停止。");
     }
 
@@ -465,6 +491,84 @@ public class ServicesManager {
 
 
     // --- 所有服務的建立方法都移到這裡 ---
+
+
+    /**
+     * 根據 CF597 協議規格，建立自定義的健康體脂秤服務 (0xFFF0)
+     */
+    private BluetoothGattService createHealthScaleC2Service() {
+        BluetoothGattService service = new BluetoothGattService(HEALTH_SCALE_C2_SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY);
+
+        // 1. Write Characteristic (0xFFF1) - App -> 設備
+        BluetoothGattCharacteristic writeCharacteristic = new BluetoothGattCharacteristic(
+                HEALTH_SCALE_C2_WRITE_UUID,
+                BluetoothGattCharacteristic.PROPERTY_WRITE | BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
+                BluetoothGattCharacteristic.PERMISSION_WRITE);
+        service.addCharacteristic(writeCharacteristic);
+
+        // 2. Notify Characteristic (0xFFF4) - 設備 -> App
+        BluetoothGattCharacteristic notifyCharacteristic = new BluetoothGattCharacteristic(
+                HEALTH_SCALE_C2_NOTIFY_UUID,
+                BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+                0 /* Permissions are not relevant for notifications */);
+        BluetoothGattDescriptor cccd = new BluetoothGattDescriptor(CCCD_UUID, BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE);
+        cccd.setValue(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE);
+        notifyCharacteristic.addDescriptor(cccd);
+        service.addCharacteristic(notifyCharacteristic);
+
+        // 3. Secondary RWN Characteristic (0xFFF2) - 次要通道
+        BluetoothGattCharacteristic rwnCharacteristic = new BluetoothGattCharacteristic(
+                HEALTH_SCALE_C2_RWN_UUID,
+                BluetoothGattCharacteristic.PROPERTY_READ | BluetoothGattCharacteristic.PROPERTY_WRITE | BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+                BluetoothGattCharacteristic.PERMISSION_READ | BluetoothGattCharacteristic.PERMISSION_WRITE);
+        BluetoothGattDescriptor rwnCccd = new BluetoothGattDescriptor(CCCD_UUID, BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE);
+        rwnCccd.setValue(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE);
+        rwnCharacteristic.addDescriptor(rwnCccd);
+        rwnCharacteristic.setValue(new byte[]{0x00}); // 初始值
+        service.addCharacteristic(rwnCharacteristic);
+
+        return service;
+    }
+
+    /**
+     * 建立標準的電池服務 (0x180F)，讓 App 可以讀取電量
+     */
+    private BluetoothGattService createStandardBatteryService() {
+        BluetoothGattService service = new BluetoothGattService(BATTERY_SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY);
+
+        BluetoothGattCharacteristic batteryLevel = new BluetoothGattCharacteristic(
+                BATTERY_LEVEL_UUID,
+                BluetoothGattCharacteristic.PROPERTY_READ | BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+                BluetoothGattCharacteristic.PERMISSION_READ);
+
+        BluetoothGattDescriptor cccd = new BluetoothGattDescriptor(CCCD_UUID, BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE);
+        cccd.setValue(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE);
+        batteryLevel.addDescriptor(cccd);
+
+        batteryLevel.setValue(new byte[]{(byte) 98}); // 設置初始電量為 98%
+        service.addCharacteristic(batteryLevel);
+
+        return service;
+    }
+
+    /**
+     * 建立標準的設備資訊服務 (0x180A)，讓 App 可以讀取版本號
+     */
+    private BluetoothGattService createStandardDeviceInfoService() {
+        BluetoothGattService service = new BluetoothGattService(DEVICE_INFO_SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY);
+
+        // 韌體版本特徵 (0x2A26)
+        BluetoothGattCharacteristic firmwareRevision = new BluetoothGattCharacteristic(
+                FIRMWARE_REVISION_STRING_UUID,
+                BluetoothGattCharacteristic.PROPERTY_READ,
+                BluetoothGattCharacteristic.PERMISSION_READ);
+
+        firmwareRevision.setValue("1.0.0"); // 設置韌體版本號
+        service.addCharacteristic(firmwareRevision);
+
+        return service;
+    }
+
 
     private BluetoothGattService createBatteryService() {
         final UUID BATTERY_SERVICE_UUID = UUID.fromString("0000180F-0000-1000-8000-00805f9b34fb");
@@ -1255,5 +1359,81 @@ public class ServicesManager {
 
 
         return service;
+    }
+
+    /**
+     * 開始模擬 CF597 設備的行為
+     * 1. 立即發送設備狀態信息 (FE 36)
+     * 2. 延遲幾秒後，模擬用戶上秤，開始發送即時體重阻抗數據 (DF)
+     */
+    public void startCf597Simulation() {
+        if (gattServer == null || connectedDevices.isEmpty()) {
+            Log.w(TAG, "無法開始 CF597 模擬：沒有 GATT Server 或沒有已連接的設備。");
+            return;
+        }
+
+        // 停止之前的模擬（如果有的話）
+        if (cf597SimulatorThread != null) {
+            cf597SimulatorThread.interrupt();
+        }
+
+        cf597SimulatorThread = new Thread(() -> {
+            try {
+                Log.d(TAG, "CF597 模擬開始...");
+
+                // 步驟 1: 立即發送設備信息 (FE 36)，讓 App 知道我們的狀態
+                Log.d(TAG, "發送 CF597 設備信息 (FE 36)...");
+                byte[] deviceInfo = GattValueBuilder.forDeviceInfo_FE36(98, 101, 102); // 電量98%, MCU 1.01, BLE 1.02
+                notifyCharacteristicChanged(HEALTH_SCALE_C2_NOTIFY_UUID, deviceInfo, false);
+
+                // 步驟 2: 延遲 5 秒，模擬用戶站上體重計
+                Thread.sleep(5000);
+                if (!isSimulating) return;
+
+                // 步驟 3: 開始發送即時測量數據 (DF)，模擬稱重過程，發送 3 次
+                Log.d(TAG, "開始發送 CF597 即時測量數據 (DF)...");
+                for (int i = 0; i < 3; i++) {
+                    if (!isSimulating) break;
+                    // 模擬體重有輕微浮動
+                    float simulatedWeight = 65.5f + (random.nextFloat() * 0.1f);
+                    byte[] realtimeData = GattValueBuilder.forRealtimeImpedanceData_DF(simulatedWeight);
+                    notifyCharacteristicChanged(HEALTH_SCALE_C2_NOTIFY_UUID, realtimeData, false);
+                    Thread.sleep(1000); // 每秒發送一次
+                }
+
+                Log.d(TAG, "CF597 即時測量模擬完成。");
+
+            } catch (InterruptedException e) {
+                Log.d(TAG, "CF597 模擬線程被中斷。");
+                Thread.currentThread().interrupt();
+            }
+        });
+        cf597SimulatorThread.start();
+    }
+
+    /**
+     * 通用通知方法，通過特徵的 UUID 來發送通知或指示
+     */
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    private void notifyCharacteristicChanged(UUID characteristicUuid, byte[] value, boolean confirm) {
+        BluetoothGattService service = gattServer.getService(characteristicUuid.equals(HEALTH_SCALE_C2_NOTIFY_UUID) ? HEALTH_SCALE_C2_SERVICE_UUID : null);
+        if(service == null) {
+            // 為了兼容舊的寫法，我們遍歷查找
+            for(BluetoothGattService s : getAllServices()){
+                BluetoothGattCharacteristic c = s.getCharacteristic(characteristicUuid);
+                if(c != null){
+                    notifyCharacteristicChanged(c, value, confirm);
+                    return;
+                }
+            }
+            Log.e(TAG, "找不到特徵來發送通知: " + characteristicUuid);
+            return;
+        }
+        BluetoothGattCharacteristic characteristic = service.getCharacteristic(characteristicUuid);
+        if(characteristic != null) {
+            notifyCharacteristicChanged(characteristic, value, confirm);
+        } else {
+            Log.e(TAG, "找不到特徵來發送通知: " + characteristicUuid);
+        }
     }
 }

@@ -3,6 +3,7 @@ package com.tutsplus.bleadvertising;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Calendar;
+import java.util.TimeZone;
 
 /**
  * 一個輔助類別，使用建造者模式（Builder-style methods）來封裝建立標準 GATT 特徵值的複雜邏輯。
@@ -524,5 +525,160 @@ public final class GattValueBuilder {
         buffer.putShort((short) weightValue);
 
         return buffer.array();
+    }
+
+    /**
+     * 生成設備信息數據包 (FE 36)
+     * 這是連接後非常關鍵的一個數據包，用於告知 App 設備的基礎狀態。
+     *
+     * @param batteryLevel 當前電量 (0-100)
+     * @param mcuVersion MCU 軟體版本 (e.g., 101 for "1.01")
+     * @param bleVersion BLE 軟體版本 (e.g., 102 for "1.02")
+     * @return 組裝好的 byte[]
+     */
+    public static byte[] forDeviceInfo_FE36(int batteryLevel, int mcuVersion, int bleVersion) {
+        // 根據 spec: FE 36 電量(1) 設備狀態(1) MCU版本(2) BLE版本(2) UTC時間(4) 校驗和(1)
+        ByteBuffer buffer = ByteBuffer.allocate(13).order(ByteOrder.LITTLE_ENDIAN);
+
+        buffer.put((byte) 0xFE); // 標頭
+        buffer.put((byte) 0x36); // 命令字
+
+        buffer.put((byte) batteryLevel); // 電量
+        buffer.put((byte) 0x00); // 設備狀態: 00 表示正常，非配網模式
+
+        // MCU 版本 (2 bytes, little-endian)
+        buffer.putShort((short) mcuVersion);
+        // BLE 版本 (2 bytes, little-endian)
+        buffer.putShort((short) bleVersion);
+
+        // UTC 時間 (4 bytes, little-endian)
+        long utcSeconds = Calendar.getInstance(TimeZone.getTimeZone("UTC")).getTimeInMillis() / 1000L;
+        buffer.putInt((int) utcSeconds);
+
+        // 計算校驗和 (從 byte[1] 到 byte[11])
+        byte checksum = 0;
+        for (int i = 1; i < 12; i++) {
+            checksum += buffer.get(i);
+        }
+        buffer.put(checksum);
+
+        return buffer.array();
+    }
+
+
+    /**
+     * 生成即時八電極阻抗數據包 (DF)
+     *
+     * @param weightKg 體重 (公斤)
+     * @return 組裝好的 byte[]
+     */
+    public static byte[] forRealtimeImpedanceData_DF(float weightKg) {
+        // 根據 spec: DF 體重(2) 穩定標誌(1) 保留(1) 阻抗1(2) ... 阻抗8(2) 校驗和(1)
+        // 總長度: 1 + 2 + 1 + 1 + (8 * 2) + 1 = 22 bytes
+        ByteBuffer buffer = ByteBuffer.allocate(22).order(ByteOrder.LITTLE_ENDIAN);
+
+        buffer.put((byte) 0xDF); // 標頭
+
+        // 體重: 單位 0.01kg, 所以乘以 100
+        buffer.putShort((short)(weightKg * 100));
+
+        buffer.put((byte) 0x01); // 0x01: 體重穩定標誌
+        buffer.put((byte) 0x00); // 保留位
+
+        // 模擬 8 個部位的阻抗值 (各 2 bytes)
+        buffer.putShort((short) 500); // Z1: 左腿
+        buffer.putShort((short) 505); // Z2: 右腿
+        buffer.putShort((short) 480); // Z3: 軀幹
+        buffer.putShort((short) 610); // Z4: 左臂
+        buffer.putShort((short) 615); // Z5: 右臂
+        buffer.putShort((short) 1100); // Z6: 左腿-左臂
+        buffer.putShort((short) 1120); // Z7: 右腿-右臂
+        buffer.putShort((short) 1000); // Z8: 左臂-右臂
+
+        // 計算校驗和 (從 byte[1] 到 byte[20])
+        byte checksum = 0;
+        for (int i = 1; i < 21; i++) {
+            checksum += buffer.get(i);
+        }
+        buffer.put(checksum);
+
+        return buffer.array();
+    }
+
+    /**
+     * 生成歷史數據記錄 (TLV 格式)
+     * @return 組裝好的 byte[]
+     */
+    public static byte[] forHistoryTlvData() {
+        // 模擬一條歷史記錄
+        // TLV 格式: Type(1) Length(1) Value(N)
+        // 記錄包含: 體重(0x01), 心率(0x0D), 8個阻抗(0x05-0x0C)
+
+        // 數據包: F2 總長(1) 時間戳(4) [TLV1 TLV2 ...] 校驗和(1)
+
+        // --- 創建 TLV Payloads ---
+        // 1. 體重 TLV (Type 0x01, Length 2, Value: 65.50kg)
+        byte[] weightTlv = new byte[]{(byte) 0x01, 0x02, (byte)0x96, (byte)0x19}; // 6550 -> 0x1996 -> 96 19
+        // 2. 心率 TLV (Type 0x0D, Length 1, Value: 75bpm)
+        byte[] heartRateTlv = new byte[]{(byte) 0x0D, 0x01, (byte)75};
+        // 3. 八電極阻抗 TLVs (Type 0x05-0x0C, Length 2)
+        byte[] z1_tlv = new byte[]{(byte)0x05, 0x02, (byte)0xF4, (byte)0x01}; // 500
+        byte[] z2_tlv = new byte[]{(byte)0x06, 0x02, (byte)0xFA, (byte)0x01}; // 505
+        // ... (可以繼續添加其他阻抗)
+
+        // 合併所有 TLV
+        ByteBuffer tlvBuffer = ByteBuffer.allocate(50); // 分配足夠空間
+        tlvBuffer.put(weightTlv).put(heartRateTlv).put(z1_tlv).put(z2_tlv);
+        byte[] allTlvs = new byte[tlvBuffer.position()];
+        tlvBuffer.rewind();
+        tlvBuffer.get(allTlvs);
+
+        // --- 創建完整歷史數據包 ---
+        int totalLength = 1 + 4 + allTlvs.length; // 總長欄位 + 時間戳 + TLV數據長度
+        ByteBuffer finalBuffer = ByteBuffer.allocate(totalLength + 3).order(ByteOrder.LITTLE_ENDIAN); // F2 + 總長 + [payload] + 校驗和
+
+        finalBuffer.put((byte) 0xF2); // 標頭
+        finalBuffer.put((byte) totalLength); // Payload總長
+
+        // 過去某個時間點的時間戳
+        long pastTime = (System.currentTimeMillis() / 1000L) - (3600 * 24); // 模擬一天前的記錄
+        finalBuffer.putInt((int) pastTime);
+
+        finalBuffer.put(allTlvs); // 放入所有 TLV 數據
+
+        // 計算校驗和 (從 byte[1] 到最後一個 payload byte)
+        byte checksum = 0;
+        for (int i = 1; i < finalBuffer.position(); i++) {
+            checksum += finalBuffer.get(i);
+        }
+        finalBuffer.put(checksum);
+
+        return finalBuffer.array();
+    }
+
+    /**
+     * 生成一個通用的 ACK 包 (FD Sub-OpCode status)
+     * 這是 App -> 設備方向的確認包，用於響應 App 的寫入操作。
+     * @param subOpCode App 發送的子命令
+     * @param status 0x00=成功, 0x01=失敗
+     * @return 組裝好的 byte[]
+     */
+    public static byte[] forGenericAck(byte subOpCode, byte status) {
+        // 格式: FD subOpCode status
+        // 注意: 這個是簡化的 ACK，用於 F2 等指令的快速響應。
+        // 與 MCU -> BLE 的 "55 FD ..." 格式不同。
+        return new byte[]{(byte) 0xFD, subOpCode, status};
+    }
+
+    /**
+     * 7.1/7.2/7.4 MCU -> BLE 通用響應 (55 FD SubOp raw_checksum AA)
+     * 用於回應上電同步(5A)、時間同步(CC)、WIFI狀態(42)等指令
+     * @param subOpCode 子命令碼，例如 0x5A
+     * @return 組裝好的 byte[]
+     */
+    public static byte[] forGenericMcuResponse(byte subOpCode) {
+        // 根據 spec: 55 FD SubOp raw_checksum AA
+        // 此處的 raw_checksum 是 App 發來指令的校驗碼，我們這裡用 0x00 佔位
+        return new byte[]{(byte) 0x55, (byte) 0xFD, subOpCode, (byte) 0x00, (byte) 0xAA};
     }
 }
